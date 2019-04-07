@@ -9,6 +9,7 @@ extern crate enum_derive;
 extern crate nom;
 
 pub mod command;
+pub mod connection;
 pub mod constants;
 pub mod response;
 
