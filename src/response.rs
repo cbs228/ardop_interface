@@ -1,5 +1,22 @@
 //! Status messages received from the TNC
 //!
+//! The main method, `Response::parse()`, invokes a `nom` parser which
+//! attempts to parse a TNC output from the provided byte stream.
+//! In the output,
+//!
+//! 0. Contains the remaining bytes which have not yet been parsed
+//!    into a TNC message. Provide these bytes to future calls to
+//!    `Response::parse()`.
+//!
+//! 1. If the parser matched anything contains `Some` `Response`,
+//!    which is further enumerated.
+//!
+//! ```
+//! use rust_ardop::response::{Response, Event, State};
+//! let res = Response::parse("NEWSTATE IRS\rBLAH".as_bytes());
+//! assert_eq!(Some(Response::Event(Event::NEWSTATE(State::IRS))), res.1);
+//! assert_eq!("BLAH", std::str::from_utf8(res.0).unwrap());
+//! ```
 
 use std::str;
 use std::string::String;
@@ -8,11 +25,11 @@ use nom;
 use nom::types::CompleteStr;
 use nom::*;
 
-use super::constants as C;
+use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
 
 custom_derive! {
     /// ARQ Connection States
-    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay)]
+    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay, Clone)]
     pub enum State {
         /// Codec stopped
         OFFLINE,
@@ -68,25 +85,12 @@ pub enum ConnectionFailedReason {
     NoAnswer,
 }
 
-/// Response messages
+/// Event messages
 ///
-/// The TNC has two types of output messages:
-/// 1. A response to a command (request-reply pattern)
-/// 2. An asynchronous reporting on some event (publish-subscribe pattern)
+/// These events are always sent asynchronously—i.e., not at the
+/// request of the host.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Response {
-    /// Successful command execution
-    ///
-    /// Reports that a host-initiated command of the given type
-    /// has been accepted and has or will be acted upon. Some
-    /// commands may have other side effects or state changes.
-    /// A positive response does not indicate that the command has
-    /// executed to completion. Merely that it has been accepted.
-    CommandAccepted(C::CommandID),
-
-    /// An unknown, unsolicited message from the TNC
-    Unhandled(String),
-
+pub enum Event {
     /// Bytes of payload data that is "pending"
     ///
     /// Length of the data that is currently in the process of being
@@ -115,9 +119,6 @@ pub enum Response {
 
     /// An existing ARQ link has been disconnected
     DISCONNECTED,
-
-    /// A generic, free-form error message
-    FAULT(String),
 
     /// Announces a state transition to the given State
     NEWSTATE(State),
@@ -186,8 +187,50 @@ pub enum Response {
     /// our proper assigned `MYCALL` (plus SSID).
     TARGET(String),
 
-    /// Reports version information
-    VERSION(String),
+    /// An unknown, unsolicited message from the TNC
+    Unknown(String),
+}
+
+/// Command success or failure
+///
+/// Reports that a command initiated by the host has either
+/// succeeded or failed.
+///
+/// - For successful commands, returns the Command ID and,
+///   for some commands, a descriptive string. At present,
+///   the string is only populated for `VERSION` responses.
+///
+/// - For erroneous commands, returns the error message.
+///   There is no standard way to determine the ID of a
+///   failed command.
+pub type CommandResult = Result<(CommandID, Option<String>), String>;
+
+/// Response messages
+///
+/// The TNC has two types of output messages:
+/// 1. A response to a command (request-reply pattern)
+/// 2. An asynchronous reporting on some event (publish-subscribe pattern)
+#[derive(Debug, PartialEq, Eq)]
+pub enum Response {
+    /// Command success or failure
+    ///
+    /// Reports that a command initiated by the host has either
+    /// succeeded or failed.
+    ///
+    /// - For successful commands, returns the Command ID and,
+    ///   for some commands, a descriptive string. At present,
+    ///   the string is only populated for `VERSION` responses.
+    ///
+    /// - For erroneous commands, returns the error message.
+    ///   There is no standard way to determine the ID of a
+    ///   failed command.
+    CommandResult(CommandResult),
+
+    /// Asynchronous event message
+    ///
+    /// `Event`s report `CONNECTED`, `DISCONNECTED`, and many other
+    /// potential state transitions.
+    Event(Event),
 }
 
 impl Response {
@@ -197,11 +240,16 @@ impl Response {
     /// returns it. The remaining bytes, which are not yet parsed,
     /// are also returned.
     ///
+    /// A catch-all Response, `Response::Event(Event::Unknown(String))`
+    /// exists to parse messages which are otherwise not parseable.
+    ///
     /// Parameters
     /// - `inp`: Raw bytes received from the TNC
     ///
     /// Return Value
-    ///
+    /// 0. Remaining bytes not yet parsed into a message. Present these
+    ///    bytes to future calls to `parse()`
+    /// 1. A `Response` parsed from `inp`, if any.
     pub fn parse(inp: &[u8]) -> (&[u8], Option<Response>) {
         match parse_line(inp) {
             Err(e) => {
@@ -228,7 +276,7 @@ named!(
     parse_line<&[u8], CompleteStr>,
     do_parse!(
         lin: map_res!(
-            take_until_and_consume!(C::NEWLINE_STR),
+            take_until_and_consume!(NEWLINE_STR),
             std::str::from_utf8
         ) >>
         (CompleteStr(lin))
@@ -272,7 +320,7 @@ named!(
             take_while!(|_x| true),
             |s: CompleteStr| (*s).to_owned()
         ) >>
-        (Response::Unhandled(aa))
+        (Response::Event(Event::Unknown(aa)))
     )
 );
 
@@ -285,10 +333,10 @@ named!(
     do_parse!(
         cmd: map_res!(
             take_while!(is_alpha),
-            |s: CompleteStr| (*s).parse::<C::CommandID>()
+            |s: CompleteStr| (*s).parse::<CommandID>()
         ) >>
         take_while!(|_x| true) >>
-        (Response::CommandAccepted(cmd))
+        (Response::CommandResult(Ok((cmd, None))))
     )
 );
 
@@ -298,7 +346,7 @@ named!(
         tag!(r"BUFFER") >>
         take_while!(is_space) >>
         aa: parse_u16 >>
-        (Response::BUFFER(aa))
+        (Response::Event(Event::BUFFER(aa)))
     )
 );
 
@@ -308,7 +356,7 @@ named!(
         tag!(r"BUSY") >>
         take_while!(is_space) >>
         aa: parse_boolstr_like >>
-        (Response::BUSY(aa))
+        (Response::Event(Event::BUSY(aa)))
     )
 );
 
@@ -316,7 +364,7 @@ named!(
     parse_cancelpending<CompleteStr, Response>,
     do_parse!(
         tag!(r"CANCELPENDING") >>
-        (Response::CANCELPENDING)
+        (Response::Event(Event::CANCELPENDING))
     )
 );
 
@@ -335,7 +383,7 @@ named!(
                 ((*gs).to_owned())
             )
         ) >>
-        (Response::CONNECTED((*aa).to_owned(), bw, gs))
+        (Response::Event(Event::CONNECTED((*aa).to_owned(), bw, gs)))
     )
 );
 
@@ -343,7 +391,7 @@ named!(
     parse_disconnected<CompleteStr, Response>,
     do_parse!(
         tag!(r"DISCONNECTED") >>
-        (Response::DISCONNECTED)
+        (Response::Event(Event::DISCONNECTED))
     )
 );
 
@@ -356,7 +404,7 @@ named!(
             take_while!(is_alphanumeric),
             |s: CompleteStr| (*s).parse::<State>()
         ) >>
-        (Response::NEWSTATE(aa))
+        (Response::Event(Event::NEWSTATE(aa)))
     )
 );
 
@@ -366,7 +414,7 @@ named!(
         tag!(r"FAULT") >>
         take_while!(is_space) >>
         aa: take_while!(|_x| true) >>
-        (Response::FAULT((*aa).to_owned()))
+        (Response::CommandResult(Err((*aa).to_owned())))
     )
 );
 
@@ -374,7 +422,7 @@ named!(
     parse_pending<CompleteStr, Response>,
     do_parse!(
         tag!(r"PENDING") >>
-        (Response::PENDING)
+        (Response::Event(Event::PENDING))
     )
 );
 
@@ -390,7 +438,7 @@ named!(
         snr: parse_u16 >>
         take_while!(is_space) >>
         qual: parse_u16 >>
-        (Response::PING((*tx).to_owned(), (*rem).to_owned(), snr, qual))
+        (Response::Event(Event::PING((*tx).to_owned(), (*rem).to_owned(), snr, qual)))
     )
 );
 
@@ -402,7 +450,7 @@ named!(
         snr: parse_u16 >>
         take_while!(is_space) >>
         qual: parse_u16 >>
-        (Response::PINGACK(snr, qual))
+        (Response::Event(Event::PINGACK(snr, qual)))
     )
 );
 
@@ -410,7 +458,7 @@ named!(
     parse_pingreply<CompleteStr, Response>,
     do_parse!(
         tag!(r"PINGREPLY") >>
-        (Response::PINGREPLY)
+        (Response::Event(Event::PINGREPLY))
     )
 );
 
@@ -420,7 +468,7 @@ named!(
         tag!(r"PTT") >>
         take_while!(is_space) >>
         aa: parse_boolstr_like >>
-        (Response::PTT(aa))
+        (Response::Event(Event::PTT(aa)))
     )
 );
 
@@ -430,7 +478,7 @@ named!(
         tag!(r"STATUS") >>
         take_while!(is_space) >>
         aa: take_while!(|_x| true) >>
-        (Response::STATUS((*aa).to_owned()))
+        (Response::Event(Event::STATUS((*aa).to_owned())))
     )
 );
 
@@ -440,7 +488,7 @@ named!(
         tag!(r"VERSION") >>
         take_while!(is_space) >>
         aa: take_while!(|_x| true) >>
-        (Response::VERSION((*aa).to_owned()))
+        (Response::CommandResult(Ok((CommandID::VERSION, Some((*aa).to_owned())))))
     )
 );
 
@@ -458,7 +506,7 @@ named!(
         tag!(r"TARGET") >>
         take_while!(is_space) >>
         aa: take_while!(is_call_letters) >>
-        (Response::TARGET((*aa).to_owned()))
+        (Response::Event(Event::TARGET((*aa).to_owned())))
     )
 );
 
@@ -467,7 +515,7 @@ named!(
     do_parse!(
         tag!(r"REJECTED") >>
         aa: parse_rejection_reason >>
-        (Response::REJECTED(aa))
+        (Response::Event(Event::REJECTED(aa)))
     )
 );
 
@@ -495,10 +543,10 @@ named!(
     parse_boolstr_like<CompleteStr, bool>,
     alt!(
         do_parse!(
-            tag!(C::TRUE) >> (true)
+            tag!(TRUE) >> (true)
         ) |
         do_parse!(
-            tag!(C::FALSE) >> (false)
+            tag!(FALSE) >> (false)
         )
     )
 );
@@ -559,7 +607,10 @@ mod test {
     #[test]
     fn test_parse_anything() {
         let res = parse_anything(CompleteStr("HELO WORLD"));
-        assert_eq!(Response::Unhandled("HELO WORLD".to_owned()), res.unwrap().1);
+        assert_eq!(
+            Response::Event(Event::Unknown("HELO WORLD".to_owned())),
+            res.unwrap().1
+        );
     }
 
     #[test]
@@ -580,7 +631,9 @@ mod test {
     #[test]
     fn test_parse_rejected() {
         assert_eq!(
-            Response::REJECTED(ConnectionFailedReason::IncompatibleBandwidth),
+            Response::Event(Event::REJECTED(
+                ConnectionFailedReason::IncompatibleBandwidth
+            )),
             parse_rejected(CompleteStr("REJECTEDBW")).unwrap().1
         );
     }
@@ -588,29 +641,33 @@ mod test {
     #[test]
     fn test_parse_buffer() {
         let res = parse_buffer(CompleteStr("BUFFER 160"));
-        assert_eq!(Response::BUFFER(160), res.unwrap().1);
+        assert_eq!(Response::Event(Event::BUFFER(160)), res.unwrap().1);
     }
 
     #[test]
     fn test_parse_busy() {
         let res = parse_busy(CompleteStr("BUSY TRUE"));
-        assert_eq!(Response::BUSY(true), res.unwrap().1);
+        assert_eq!(Response::Event(Event::BUSY(true)), res.unwrap().1);
 
         let res = parse_busy(CompleteStr("BUSY FALSE"));
-        assert_eq!(Response::BUSY(false), res.unwrap().1);
+        assert_eq!(Response::Event(Event::BUSY(false)), res.unwrap().1);
     }
 
     #[test]
     fn test_parse_connected() {
         let res = parse_connected(CompleteStr("CONNECTED W1AW-Z 500 EM00"));
         assert_eq!(
-            Response::CONNECTED("W1AW-Z".to_owned(), 500, Some("EM00".to_owned())),
+            Response::Event(Event::CONNECTED(
+                "W1AW-Z".to_owned(),
+                500,
+                Some("EM00".to_owned())
+            )),
             res.unwrap().1
         );
 
         let res = parse_connected(CompleteStr("CONNECTED W1AW-Z 500"));
         assert_eq!(
-            Response::CONNECTED("W1AW-Z".to_owned(), 500, None),
+            Response::Event(Event::CONNECTED("W1AW-Z".to_owned(), 500, None)),
             res.unwrap().1
         );
     }
@@ -619,7 +676,7 @@ mod test {
     fn test_parse_fault() {
         let res = parse_fault(CompleteStr("FAULT it isn't working"));
         assert_eq!(
-            Response::FAULT("it isn't working".to_owned()),
+            Response::CommandResult(Err("it isn't working".to_owned())),
             res.unwrap().1
         );
     }
@@ -627,14 +684,17 @@ mod test {
     #[test]
     fn test_parse_newstate() {
         let res = parse_newstate(CompleteStr("NEWSTATE DISC"));
-        assert_eq!(Response::NEWSTATE(State::DISC), res.unwrap().1);
+        assert_eq!(
+            Response::Event(Event::NEWSTATE(State::DISC)),
+            res.unwrap().1
+        );
     }
 
     #[test]
     fn test_parse_ping() {
         let res = parse_ping(CompleteStr("PING W1AW>CQ 10 80"));
         assert_eq!(
-            Response::PING("W1AW".to_owned(), "CQ".to_owned(), 10, 80),
+            Response::Event(Event::PING("W1AW".to_owned(), "CQ".to_owned(), 10, 80)),
             res.unwrap().1
         );
     }
@@ -642,26 +702,26 @@ mod test {
     #[test]
     fn test_parse_pingack() {
         let res = parse_pingack(CompleteStr("PINGACK 10 80"));
-        assert_eq!(Response::PINGACK(10, 80), res.unwrap().1);
+        assert_eq!(Response::Event(Event::PINGACK(10, 80)), res.unwrap().1);
     }
 
     #[test]
     fn test_parse_pingreply() {
         let res = parse_pingreply(CompleteStr("PINGREPLY"));
-        assert_eq!(Response::PINGREPLY, res.unwrap().1);
+        assert_eq!(Response::Event(Event::PINGREPLY), res.unwrap().1);
     }
 
     #[test]
     fn test_parse_ptt() {
         let res = parse_ptt(CompleteStr("PTT TRUE"));
-        assert_eq!(Response::PTT(true), res.unwrap().1);
+        assert_eq!(Response::Event(Event::PTT(true)), res.unwrap().1);
     }
 
     #[test]
     fn test_parse_status() {
         let res = parse_status(CompleteStr("STATUS everything alright"));
         assert_eq!(
-            Response::STATUS("everything alright".to_owned()),
+            Response::Event(Event::STATUS("everything alright".to_owned())),
             res.unwrap().1
         );
     }
@@ -669,26 +729,32 @@ mod test {
     #[test]
     fn test_parse_target() {
         let res = parse_target(CompleteStr("TARGET W1AW-Z"));
-        assert_eq!(Response::TARGET("W1AW-Z".to_owned()), res.unwrap().1);
+        assert_eq!(
+            Response::Event(Event::TARGET("W1AW-Z".to_owned())),
+            res.unwrap().1
+        );
     }
 
     #[test]
     fn test_parse_version() {
         let res = parse_version(CompleteStr("VERSION 1.0.4"));
-        assert_eq!(Response::VERSION("1.0.4".to_owned()), res.unwrap().1);
+        assert_eq!(
+            Response::CommandResult(Ok((CommandID::VERSION, Some("1.0.4".to_owned())))),
+            res.unwrap().1
+        );
     }
 
     #[test]
     fn test_parse_command_ok() {
         let res = parse_command_ok(CompleteStr("MYAUX"));
         assert_eq!(
-            Response::CommandAccepted(C::CommandID::MYAUX),
+            Response::CommandResult(Ok((CommandID::MYAUX, None))),
             res.unwrap().1
         );
 
         let res = parse_command_ok(CompleteStr("ARQBW now 2500"));
         assert_eq!(
-            Response::CommandAccepted(C::CommandID::ARQBW),
+            Response::CommandResult(Ok((CommandID::ARQBW, None))),
             res.unwrap().1
         );
     }
@@ -696,14 +762,20 @@ mod test {
     #[test]
     fn test_parse_response() {
         let res = parse_response(CompleteStr("VERSION 1.0.4-b4"));
-        assert_eq!(Response::VERSION("1.0.4-b4".to_owned()), res.unwrap().1);
+        assert_eq!(
+            Response::CommandResult(Ok((CommandID::VERSION, Some("1.0.4-b4".to_owned())))),
+            res.unwrap().1
+        );
 
         let res = parse_response(CompleteStr("blah blah"));
-        assert_eq!(Response::Unhandled("blah blah".to_owned()), res.unwrap().1);
+        assert_eq!(
+            Response::Event(Event::Unknown("blah blah".to_owned())),
+            res.unwrap().1
+        );
 
         let res = parse_response(CompleteStr("CONNECTED W1AW 500"));
         assert_eq!(
-            Response::CONNECTED("W1AW".to_owned(), 500, None),
+            Response::Event(Event::CONNECTED("W1AW".to_owned(), 500, None)),
             res.unwrap().1
         );
     }
@@ -712,10 +784,10 @@ mod test {
     fn test_parse() {
         let res = Response::parse("PENDING\rCANCELPENDING\r".as_bytes());
         assert_eq!(14, res.0.len());
-        assert_eq!(Some(Response::PENDING), res.1);
+        assert_eq!(Some(Response::Event(Event::PENDING)), res.1);
         let res = Response::parse(res.0);
         assert_eq!(0, res.0.len());
-        assert_eq!(Some(Response::CANCELPENDING), res.1);
+        assert_eq!(Some(Response::Event(Event::CANCELPENDING)), res.1);
         let res = Response::parse(res.0);
         assert_eq!(0, res.0.len());
         assert_eq!(None, res.1);
@@ -725,6 +797,6 @@ mod test {
         assert_eq!(None, res.1);
 
         let res = Response::parse("NEWSTATE IRS\r".as_bytes());
-        assert_eq!(Some(Response::NEWSTATE(State::IRS)), res.1);
+        assert_eq!(Some(Response::Event(Event::NEWSTATE(State::IRS))), res.1);
     }
 }
