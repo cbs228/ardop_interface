@@ -7,11 +7,12 @@ extern crate enum_derive;
 #[allow(unused_imports)]
 #[macro_use]
 extern crate nom;
+extern crate chrono;
 extern crate mio;
 
 pub mod command;
 pub mod commandchain;
-pub mod connection;
+pub mod connectioninfo;
 pub mod constants;
 pub mod response;
 pub mod tncerror;
