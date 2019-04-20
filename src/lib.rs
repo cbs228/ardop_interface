@@ -9,9 +9,11 @@ extern crate enum_derive;
 extern crate nom;
 
 pub mod command;
+pub mod commandchain;
 pub mod connection;
 pub mod constants;
 pub mod response;
+pub mod tncerror;
 
 #[cfg(test)]
 mod tests {

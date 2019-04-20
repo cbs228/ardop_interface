@@ -191,6 +191,15 @@ pub enum Event {
     Unknown(String),
 }
 
+/// Command success
+///
+/// Reports a successful command execution. A tuple of:
+/// 1. ID of the command that succeeded
+/// 2. Optional response text. At present, this is only
+///    populated for `VERSION` responses.
+///
+pub type CommandOk = (CommandID, Option<String>);
+
 /// Command success or failure
 ///
 /// Reports that a command initiated by the host has either
@@ -203,7 +212,7 @@ pub enum Event {
 /// - For erroneous commands, returns the error message.
 ///   There is no standard way to determine the ID of a
 ///   failed command.
-pub type CommandResult = Result<(CommandID, Option<String>), String>;
+pub type CommandResult = Result<CommandOk, String>;
 
 /// Response messages
 ///
