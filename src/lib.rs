@@ -7,6 +7,7 @@ extern crate enum_derive;
 #[allow(unused_imports)]
 #[macro_use]
 extern crate nom;
+extern crate mio;
 
 pub mod command;
 pub mod commandchain;
