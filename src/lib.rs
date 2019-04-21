@@ -7,6 +7,7 @@ extern crate enum_derive;
 #[allow(unused_imports)]
 #[macro_use]
 extern crate nom;
+extern crate bytes;
 extern crate chrono;
 extern crate mio;
 
