@@ -16,6 +16,7 @@ pub mod commandchain;
 pub mod connectioninfo;
 pub mod constants;
 pub mod response;
+pub mod tncdata;
 pub mod tncerror;
 
 #[cfg(test)]
