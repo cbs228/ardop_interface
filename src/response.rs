@@ -25,6 +25,7 @@ use nom;
 use nom::types::CompleteStr;
 use nom::*;
 
+use super::connectioninfo::ConnectionInfo;
 use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
 
 custom_derive! {
@@ -83,6 +84,31 @@ pub enum ConnectionFailedReason {
 
     /// No answer from peer
     NoAnswer,
+}
+
+/// Announces a change in the ARQ connection state
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConnectionStateChange {
+    /// Successfully connected
+    ///
+    /// Data is information about the connection
+    Connected(ConnectionInfo),
+
+    /// Failed to connect
+    ///
+    /// No connection was ever successfully made with
+    /// the remote peer. Failure is not limited to
+    /// `CONNECT` requests. Even when `LISTEN`ing, it
+    /// is possible for the bandwidth negotiation to
+    /// fail.
+    Failed(ConnectionFailedReason),
+
+    /// An open connection has been closed
+    ///
+    /// Connections may be closed by `DISCONNECT` tear-down
+    /// or by an `ABORT`. The loss of connection reason is
+    /// not enumerated here, however.
+    Closed,
 }
 
 /// Event messages
