@@ -56,11 +56,11 @@ impl State {
     ///
     /// Returns true if the TNC is connected to a remote
     /// peer when it is in the given state.
-    pub fn is_connected(state: Self) -> bool {
+    pub fn is_connected(state: &Self) -> bool {
         match state {
-            State::ISS => true,
-            State::IRS => true,
-            State::IRStoISS => true,
+            &State::ISS => true,
+            &State::IRS => true,
+            &State::IRStoISS => true,
             _ => false,
         }
     }
@@ -618,8 +618,8 @@ mod test {
     fn test_state() {
         assert_eq!(b"IDLE", format!("{}", State::IDLE).as_bytes());
         assert_eq!(State::DISC, str::parse("DISC").unwrap());
-        assert_eq!(true, State::is_connected(State::IRStoISS));
-        assert_eq!(false, State::is_connected(State::DISC));
+        assert_eq!(true, State::is_connected(&State::IRStoISS));
+        assert_eq!(false, State::is_connected(&State::DISC));
     }
 
     #[test]
