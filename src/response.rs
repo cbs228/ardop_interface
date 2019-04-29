@@ -10,13 +10,6 @@
 //!
 //! 1. If the parser matched anything contains `Some` `Response`,
 //!    which is further enumerated.
-//!
-//! ```
-//! use rust_ardop::response::{Response, Event, State};
-//! let res = Response::parse("NEWSTATE IRS\rBLAH".as_bytes());
-//! assert_eq!(Some(Response::Event(Event::NEWSTATE(State::IRS))), res.1);
-//! assert_eq!("BLAH", std::str::from_utf8(res.0).unwrap());
-//! ```
 
 use std::str;
 use std::string::String;
@@ -282,24 +275,24 @@ impl Response {
     /// - `inp`: Raw bytes received from the TNC
     ///
     /// Return Value
-    /// 0. Remaining bytes not yet parsed into a message. Present these
-    ///    bytes to future calls to `parse()`
+    /// 0. Number of bytes consumed
     /// 1. A `Response` parsed from `inp`, if any.
-    pub fn parse(inp: &[u8]) -> (&[u8], Option<Response>) {
+    pub fn parse(inp: &[u8]) -> (usize, Option<Response>) {
+        let inp_len = inp.len();
         match parse_line(inp) {
             Err(e) => {
                 if e.is_incomplete() {
-                    (inp, None)
+                    (0usize, None)
                 } else {
                     panic!("Unexpected parse error: {:?}", e);
                 }
             }
             Ok(res) => {
                 if res.1.len() == 0 {
-                    (res.0, None)
+                    (inp_len - res.0.len(), None)
                 } else {
                     let out = parse_response(res.1).unwrap();
-                    (res.0, Some(out.1))
+                    (inp_len - res.0.len(), Some(out.1))
                 }
             }
         }
@@ -817,18 +810,19 @@ mod test {
 
     #[test]
     fn test_parse() {
-        let res = Response::parse("PENDING\rCANCELPENDING\r".as_bytes());
-        assert_eq!(14, res.0.len());
+        let data = "PENDING\rCANCELPENDING\r";
+        let res = Response::parse(data.as_bytes());
+        assert_eq!(8, res.0);
         assert_eq!(Some(Response::Event(Event::PENDING)), res.1);
-        let res = Response::parse(res.0);
-        assert_eq!(0, res.0.len());
+        let res = Response::parse(&data.as_bytes()[8..]);
+        assert_eq!(14, res.0);
         assert_eq!(Some(Response::Event(Event::CANCELPENDING)), res.1);
-        let res = Response::parse(res.0);
-        assert_eq!(0, res.0.len());
+        let res = Response::parse(&data.as_bytes()[22..]);
+        assert_eq!(0, res.0);
         assert_eq!(None, res.1);
 
         let res = Response::parse("\r\r\r".as_bytes());
-        assert_eq!(2, res.0.len());
+        assert_eq!(1, res.0);
         assert_eq!(None, res.1);
 
         let res = Response::parse("NEWSTATE IRS\r".as_bytes());
