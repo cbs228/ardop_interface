@@ -9,12 +9,17 @@ extern crate enum_derive;
 extern crate nom;
 extern crate bytes;
 extern crate chrono;
+extern crate futures;
 extern crate mio;
+extern crate tokio;
+extern crate tokio_io;
 
 pub mod command;
 pub mod commandchain;
 pub mod connectioninfo;
 pub mod constants;
+pub mod framing;
+pub mod io;
 pub mod response;
 pub mod tncdata;
 pub mod tncerror;
