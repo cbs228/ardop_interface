@@ -7,9 +7,11 @@
 use std::collections::vec_deque::VecDeque;
 use std::io;
 use std::io::ErrorKind;
+use std::fmt;
 use std::string::String;
 
 use super::command;
+use super::constants::CommandID;
 use super::response::CommandOk;
 use super::tncerror::{TncError, TncResult};
 
@@ -18,7 +20,7 @@ use super::tncerror::{TncError, TncResult};
 /// Commandable objects can accept a single command, process it
 /// synchronously, and return its success or failure.
 pub trait Commandable {
-    /// Send a single command string, synchronously
+    /// Send a single command string
     ///
     /// This method may be used to send arbitrary, unformatted
     /// commands to the TNC. Commands sent in this manner must be
@@ -31,13 +33,27 @@ pub trait Commandable {
     /// * `cmd`: Raw command string
     ///
     /// # Returns
+    /// An empty `Result` if the command was enqueued for sending, or
+    /// an `io::Error` otherwise.
+    fn send_raw_command(&mut self, cmd: String) -> TncResult<()>;
+
+    /// Blocks until a command response is received
+    ///
+    /// Waits for acknowledgement of the given command, by ID,
+    /// to be returned from the TNC. If no response is received
+    /// from the TNC, this method will eventually timeout.
+    ///
+    /// # Parameters
+    /// * `id`: Command ID to wait for
+    ///
+    /// # returns
     /// A `Result` with the following structure:
     /// * `Ok`: A tuple of
     ///   - The command ID which was sent successfully
     ///   - An optional string response from the TNC. At present,
     ///     only populated for `VERSION` messages
     /// * `Err`: Command failure
-    fn send_raw_command(&mut self, cmd: String) -> TncResult<CommandOk>;
+    fn await_command_result(&mut self, id: CommandID) -> TncResult<CommandOk>;
 }
 
 pub struct CommandChain<'d, D: 'd>
@@ -45,7 +61,7 @@ where
     D: Commandable,
 {
     dest: &'d mut D,
-    cmds: VecDeque<String>,
+    cmds: VecDeque<(String, CommandID)>,
 }
 
 impl<'d, D> CommandChain<'d, D>
@@ -75,8 +91,9 @@ where
         )));
 
         while !self.cmds.is_empty() {
-            let p = self.cmds.pop_front().unwrap();
-            last = Ok(self.dest.send_raw_command(p)?);
+            let cm = self.cmds.pop_front().unwrap();
+            self.dest.send_raw_command(cm.0)?;
+            last = Ok(self.dest.await_command_result(cm.1)?);
         }
         return last;
     }
@@ -88,7 +105,7 @@ where
     ///
     /// You should use `disconnect()` instead!
     pub fn abort(&'d mut self) -> &'d mut Self {
-        self.cmds.push_back(command::abort().to_string());
+        self.append(command::abort());
         self
     }
 
@@ -106,7 +123,7 @@ where
     /// - `forced`: If true, use only this bandwidth and do not allow
     ///   negotiations.
     pub fn arqbw(&'d mut self, bw: u16, forced: bool) -> &'d mut Self {
-        self.cmds.push_back(command::arqbw(bw, forced).to_string());
+        { self.append(command::arqbw(bw, forced)); }
         self
     }
 
@@ -122,8 +139,7 @@ where
     /// # Parameters
     /// - `timeout`: ARQ timeout period, in seconds (30 -- 600)
     pub fn arqtimeout(&'d mut self, timeout: u16) -> &'d mut Self {
-        self.cmds
-            .push_back(command::arqtimeout(timeout).to_string());
+        { self.append(command::arqtimeout(timeout)); }
         self
     }
 
@@ -135,8 +151,7 @@ where
     /// # Parameters
     /// - `autobreak`: Enable automatic breaks
     pub fn autobreak(&'d mut self, autobreak: bool) -> &'d mut Self {
-        self.cmds
-            .push_back(command::autobreak(autobreak).to_string());
+        self.append(command::autobreak(autobreak));
         self
     }
 
@@ -148,7 +163,7 @@ where
     /// # Parameters
     /// - `block`: if true, enable busy channel lockout / blocking
     pub fn busyblock(&'d mut self, block: bool) -> &'d mut Self {
-        self.cmds.push_back(command::busyblock(block).to_string());
+        self.append(command::busyblock(block));
         self
     }
 
@@ -164,7 +179,7 @@ where
     /// - `level`: Busy detector threshold (0 -- 10). A value of 0 will disable
     ///   the busy detector (not recommended).
     pub fn busydet(&'d mut self, level: u16) -> &'d mut Self {
-        self.cmds.push_back(command::busydet(level).to_string());
+        self.append(command::busydet(level));
         self
     }
 
@@ -178,7 +193,7 @@ where
     /// # Parameters
     /// - `cw`: Send CW ID with ARDOP digital ID frames
     pub fn cwid(&'d mut self, cw: bool) -> &'d mut Self {
-        self.cmds.push_back(command::cwid(cw).to_string());
+        self.append(command::cwid(cw));
         self
     }
 
@@ -188,7 +203,7 @@ where
     /// Disconnection will be confirmed with the remote peer,
     /// if possible.
     pub fn disconnect(&'d mut self) -> &'d mut Self {
-        self.cmds.push_back(command::disconnect().to_string());
+        self.append(command::disconnect());
         self
     }
 
@@ -206,7 +221,7 @@ where
     where
         S: Into<String>,
     {
-        self.cmds.push_back(command::gridsquare(grid).to_string());
+        self.append(command::gridsquare(grid));
         self
     }
 
@@ -219,7 +234,7 @@ where
     /// # Parameters
     /// - `duration`: Leader tone duration, milliseconds
     pub fn leader(&'d mut self, duration: u16) -> &'d mut Self {
-        self.cmds.push_back(command::leader(duration).to_string());
+        self.append(command::leader(duration));
         self
     }
 
@@ -236,7 +251,7 @@ where
     /// - `aux`: Vector of auxiliary callsigns. If empty, all aux callsigns
     ///   will be removed.
     pub fn myaux(&'d mut self, aux: Vec<String>) -> &'d mut Self {
-        self.cmds.push_back(command::myaux(aux).to_string());
+        self.append(command::myaux(aux));
         self
     }
 
@@ -253,7 +268,7 @@ where
     where
         S: Into<String>,
     {
-        self.cmds.push_back(command::mycall(callsign).to_string());
+        self.append(command::mycall(callsign));
         self
     }
 
@@ -261,7 +276,7 @@ where
     ///
     /// Sends an ID frame immediately, followed by a CW ID (if `CWID` is set)
     pub fn sendid(&'d mut self) -> &'d mut Self {
-        self.cmds.push_back(command::sendid().to_string());
+        self.append(command::sendid());
         self
     }
 
@@ -270,7 +285,7 @@ where
     /// Send 5 second two-tone burst, at the normal leader amplitude. May
     /// be used in adjusting drive level to the radio.
     pub fn twotonetest(&'d mut self) -> &'d mut Self {
-        self.cmds.push_back(command::twotonetest().to_string());
+        self.append(command::twotonetest());
         self
     }
 
@@ -278,8 +293,14 @@ where
     ///
     /// Query the software version of the TNC.
     pub fn version(&'d mut self) -> &'d mut Self {
-        self.cmds.push_back(command::version().to_string());
+        self.append(command::version());
         self
+    }
+
+    // Append a command
+    fn append<I>(&mut self, command: command::Command<I>) where I: fmt::Display {
+        self.cmds
+            .push_back((command.to_string(), command.command_id().clone()));
     }
 }
 
@@ -300,11 +321,15 @@ mod test {
     }
 
     impl Commandable for Commando {
-        fn send_raw_command(&mut self, cmd: String) -> TncResult<CommandOk> {
+        fn send_raw_command(&mut self, cmd: String) -> TncResult<()> {
             println!("Got {}", cmd);
             self.count += 1;
             self.last = cmd;
-            Ok((CommandID::ABORT, None))
+            Ok(())
+        }
+
+        fn await_command_result(&mut self, id: CommandID) -> TncResult<CommandOk> {
+            Ok((id, None))
         }
     }
 
