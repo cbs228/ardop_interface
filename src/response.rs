@@ -87,6 +87,22 @@ pub enum ConnectionStateChange {
     /// Data is information about the connection
     Connected(ConnectionInfo),
 
+    /// Reports size of the outgoing queue, in bytes
+    ///
+    /// After the TNC accepts responsibility for sending
+    /// ARQ bytes, it emits a `BUFFER` message indicating
+    /// the number of bytes buffered. As bytes are
+    /// transmitted, the `BUFFER` decreases. When the
+    /// buffer reaches zero, the TNC has sent all queued
+    /// data.
+    ///
+    /// If your application allows the buffer to empty, a
+    /// link turnover is more likely to occur.
+    ///
+    /// It is possible to wait for an empty buffer with
+    /// a call to `flush()`.
+    OutgoingBuffer(u16),
+
     /// Failed to connect
     ///
     /// No connection was ever successfully made with
