@@ -12,7 +12,7 @@ pub const FALSE: &'static str = "FALSE";
 
 custom_derive! {
     /// ARDOP protocol modes
-    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay)]
+    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay, Clone)]
     pub enum ProtocolMode {
         /// Connectionless, forward error-corrected packets
         FEC,
@@ -24,7 +24,7 @@ custom_derive! {
 
 custom_derive! {
     /// ARDOP command verbs
-    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay)]
+    #[derive(Debug, PartialEq, Eq, EnumFromStr, EnumDisplay, Clone)]
     pub enum CommandID {
         /// Unclean disconnect
         ABORT,

@@ -67,7 +67,7 @@ impl State {
 }
 
 /// Reasons a remote peer will reject a connection
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectionFailedReason {
     /// Peer is busy with an existing connection, or channel busy?
     Busy,
@@ -80,7 +80,7 @@ pub enum ConnectionFailedReason {
 }
 
 /// Announces a change in the ARQ connection state
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectionStateChange {
     /// Successfully connected
     ///
@@ -124,7 +124,7 @@ pub enum ConnectionStateChange {
 ///
 /// These events are always sent asynchronously—i.e., not at the
 /// request of the host.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Event {
     /// Bytes of payload data that is "pending"
     ///
@@ -254,7 +254,7 @@ pub type CommandResult = Result<CommandOk, String>;
 /// The TNC has two types of output messages:
 /// 1. A response to a command (request-reply pattern)
 /// 2. An asynchronous reporting on some event (publish-subscribe pattern)
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Response {
     /// Command success or failure
     ///
