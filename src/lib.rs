@@ -10,7 +10,6 @@ extern crate nom;
 extern crate bytes;
 extern crate chrono;
 extern crate futures;
-extern crate mio;
 extern crate tokio;
 extern crate tokio_io;
 
