@@ -16,10 +16,10 @@ extern crate tokio_io;
 pub mod commandchain;
 pub mod connectioninfo;
 pub mod framing;
-pub mod io;
 pub mod protocol;
 pub mod tncdata;
 pub mod tncerror;
+pub mod tncio;
 
 #[cfg(test)]
 mod tests {

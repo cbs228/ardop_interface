@@ -33,7 +33,7 @@ pub trait Commandable {
     ///
     /// # Returns
     /// An empty `Result` if the command was enqueued for sending, or
-    /// an `io::Error` otherwise.
+    /// an `tncio::Error` otherwise.
     fn send_raw_command(&mut self, cmd: String) -> TncResult<()>;
 
     /// Blocks until a command response is received
