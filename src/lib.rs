@@ -14,13 +14,11 @@ extern crate mio;
 extern crate tokio;
 extern crate tokio_io;
 
-pub mod command;
 pub mod commandchain;
 pub mod connectioninfo;
-pub mod constants;
 pub mod framing;
 pub mod io;
-pub mod response;
+pub mod protocol;
 pub mod tncdata;
 pub mod tncerror;
 

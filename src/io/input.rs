@@ -14,12 +14,12 @@ use futures::sync::mpsc;
 use tokio::codec::FramedRead;
 use tokio::io::AsyncRead;
 
-use super::super::framing::control::TncControlFraming;
-use super::super::framing::data::TncDataFraming;
-use super::super::response::{CommandResult, ConnectionStateChange, Event, Response};
-use super::super::tncdata::DataIn;
 use super::busylock;
 use super::connevent::ConnEventParser;
+use crate::framing::control::TncControlFraming;
+use crate::framing::data::TncDataFraming;
+use crate::protocol::response::{CommandResult, ConnectionStateChange, Event, Response};
+use crate::tncdata::DataIn;
 
 /// Creates futures for reading control messages
 ///
@@ -156,8 +156,8 @@ mod test {
 
     use std::io::Cursor;
 
-    use super::super::super::constants::CommandID;
-    use super::super::super::response::ConnectionFailedReason;
+    use crate::protocol::response::ConnectionFailedReason;
+    use crate::protocol::CommandID;
 
     #[test]
     fn test_control() {

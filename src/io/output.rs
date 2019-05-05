@@ -4,9 +4,9 @@ use futures::prelude::*;
 use tokio::codec::FramedWrite;
 use tokio::io::AsyncWrite;
 
-use super::super::framing::control::TncControlFraming;
-use super::super::framing::data::TncDataFraming;
-use super::super::tncdata::DataOut;
+use crate::framing::control::TncControlFraming;
+use crate::framing::data::TncDataFraming;
+use crate::tncdata::DataOut;
 
 /// Create sink for sending control messages
 ///

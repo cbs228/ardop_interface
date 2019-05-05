@@ -18,8 +18,8 @@ use nom;
 use nom::types::CompleteStr;
 use nom::*;
 
-use super::connectioninfo::ConnectionInfo;
 use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
+use crate::connectioninfo::ConnectionInfo;
 
 custom_derive! {
     /// ARQ Connection States

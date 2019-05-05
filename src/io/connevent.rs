@@ -8,8 +8,8 @@
 use std::convert::Into;
 use std::string::String;
 
-use super::super::connectioninfo::{ConnectionInfo, Direction};
-use super::super::response::{ConnectionFailedReason, ConnectionStateChange, Event, State};
+use crate::connectioninfo::{ConnectionInfo, Direction};
+use crate::protocol::response::{ConnectionFailedReason, ConnectionStateChange, Event, State};
 
 /// Handles TNC events
 pub struct ConnEventParser {
@@ -115,7 +115,7 @@ impl ConnEventParser {
 mod test {
     use super::*;
 
-    use crate::response::ConnectionStateChange;
+    use crate::protocol::response::ConnectionStateChange;
 
     #[test]
     fn test_outgoing_connection() {

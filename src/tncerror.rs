@@ -3,7 +3,7 @@ use std::fmt;
 use std::io;
 use std::string::String;
 
-use super::response::CommandResult;
+use crate::protocol::response::CommandResult;
 
 /// Errors raised by the `Tnc` interface
 #[derive(Debug)]

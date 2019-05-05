@@ -6,7 +6,7 @@ use std::string::String;
 use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder};
 
-use super::super::response::Response;
+use crate::protocol::response::Response;
 
 /// Frames and sends TNC control messages
 pub struct TncControlFraming {}
@@ -45,8 +45,8 @@ impl Decoder for TncControlFraming {
 
 #[cfg(test)]
 mod test {
-    use super::super::super::response::{Event, Response};
     use super::*;
+    use crate::protocol::response::{Event, Response};
 
     use std::io::Cursor;
 

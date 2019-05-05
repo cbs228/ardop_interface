@@ -5,15 +5,14 @@
 //! For further details, see the module-level documentation for
 //! `tnc`.
 use std::collections::vec_deque::VecDeque;
+use std::fmt;
 use std::io;
 use std::io::ErrorKind;
-use std::fmt;
 use std::string::String;
 
-use super::command;
-use super::constants::CommandID;
-use super::response::CommandOk;
-use super::tncerror::{TncError, TncResult};
+use crate::protocol::command;
+use crate::protocol::{CommandID, CommandOk};
+use crate::tncerror::{TncError, TncResult};
 
 /// An object which can be commanded
 ///
@@ -123,7 +122,9 @@ where
     /// - `forced`: If true, use only this bandwidth and do not allow
     ///   negotiations.
     pub fn arqbw(&'d mut self, bw: u16, forced: bool) -> &'d mut Self {
-        { self.append(command::arqbw(bw, forced)); }
+        {
+            self.append(command::arqbw(bw, forced));
+        }
         self
     }
 
@@ -139,7 +140,9 @@ where
     /// # Parameters
     /// - `timeout`: ARQ timeout period, in seconds (30 -- 600)
     pub fn arqtimeout(&'d mut self, timeout: u16) -> &'d mut Self {
-        { self.append(command::arqtimeout(timeout)); }
+        {
+            self.append(command::arqtimeout(timeout));
+        }
         self
     }
 
@@ -298,7 +301,10 @@ where
     }
 
     // Append a command
-    fn append<I>(&mut self, command: command::Command<I>) where I: fmt::Display {
+    fn append<I>(&mut self, command: command::Command<I>)
+    where
+        I: fmt::Display,
+    {
         self.cmds
             .push_back((command.to_string(), command.command_id().clone()));
     }
@@ -306,8 +312,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::super::constants::CommandID;
     use super::*;
+    use crate::protocol::CommandID;
 
     struct Commando {
         pub count: usize,
