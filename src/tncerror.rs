@@ -16,9 +16,6 @@ pub enum TncError {
 
     /// Socket connectivity problem
     IoError(io::Error),
-
-    /// TNC failed to respond to a ping
-    PingTimeout,
 }
 
 /// Composite `Ok`/`Err` return type
@@ -30,7 +27,6 @@ impl fmt::Display for TncError {
             TncError::CommandFailed(s) => write!(f, "TNC command failed: \"{}\"", s),
             TncError::CommandTimeout => write!(f, "TNC command timed out"),
             TncError::IoError(e) => write!(f, "IO Error: {}", e),
-            TncError::PingTimeout => write!(f, "TNC connection failed"),
         }
     }
 }
@@ -41,5 +37,11 @@ impl From<CommandResult> for TncError {
             Ok(_a) => unreachable!(),
             Err(x) => TncError::CommandFailed(x),
         }
+    }
+}
+
+impl From<io::Error> for TncError {
+    fn from(e: io::Error) -> Self {
+        TncError::IoError(e)
     }
 }
