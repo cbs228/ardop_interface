@@ -9,6 +9,7 @@ use std::fmt;
 use std::io;
 use std::io::ErrorKind;
 use std::string::String;
+use std::vec::Vec;
 
 use crate::protocol::command;
 use crate::protocol::{CommandID, CommandOk};
@@ -25,16 +26,15 @@ pub trait Commandable {
     /// commands to the TNC. Commands sent in this manner must be
     /// complete, including the trailing `\r` newline separator.
     ///
-    /// You should probably use the high-level command methods instead.
-    /// See `Tnc::command` for the high-level interface.
-    ///
     /// # Parameters
-    /// * `cmd`: Raw command string
+    /// * `cmd`: Iterable collection of raw command strings
     ///
     /// # Returns
-    /// An empty `Result` if the command was enqueued for sending, or
+    /// An empty `Result` if the commands were enqueued for sending, or
     /// an `tncio::Error` otherwise.
-    fn send_raw_command(&mut self, cmd: String) -> TncResult<()>;
+    fn send_raw_commands<I>(&mut self, cmds: I) -> TncResult<()>
+    where
+        I: IntoIterator<Item = String>;
 
     /// Blocks until a command response is received
     ///
@@ -60,7 +60,8 @@ where
     D: Commandable,
 {
     dest: &'d mut D,
-    cmds: VecDeque<(String, CommandID)>,
+    send_cmds: Vec<String>,
+    await_ids: VecDeque<CommandID>,
 }
 
 impl<'d, D> CommandChain<'d, D>
@@ -72,14 +73,20 @@ where
     /// The command chain is bound to `dest`, which must exist for
     /// the lifetime of this chain.
     pub fn new(dest: &'d mut D) -> CommandChain<'d, D> {
-        let cmds = VecDeque::with_capacity(16);
+        let send_cmds = Vec::with_capacity(16);
+        let await_ids = VecDeque::with_capacity(16);
 
-        CommandChain { dest, cmds }
+        CommandChain {
+            dest,
+            send_cmds,
+            await_ids,
+        }
     }
 
     /// Send all commands
     ///
-    /// Transmits all the commands in this chain. Returns either:
+    /// Consumes this `CommandChain` and transmits all the commands within.
+    /// Returns either:
     ///
     /// * The first error, if any; OR
     /// * The last successful result
@@ -89,11 +96,16 @@ where
             "No commands provided",
         )));
 
-        while !self.cmds.is_empty() {
-            let cm = self.cmds.pop_front().unwrap();
-            self.dest.send_raw_command(cm.0)?;
-            last = Ok(self.dest.await_command_result(cm.1)?);
+        // send all
+        let outcmds = self.send_cmds.drain(..);
+        self.dest.send_raw_commands(outcmds)?;
+
+        // await all
+        while !self.await_ids.is_empty() {
+            let cm = self.await_ids.pop_front().unwrap();
+            last = Ok(self.dest.await_command_result(cm)?);
         }
+
         return last;
     }
 
@@ -305,8 +317,9 @@ where
     where
         I: fmt::Display,
     {
-        self.cmds
-            .push_back((command.to_string(), command.command_id().clone()));
+        let cmdid = command.command_id().clone();
+        self.send_cmds.push(command.to_string());
+        self.await_ids.push_back(cmdid);
     }
 }
 
@@ -327,10 +340,14 @@ mod test {
     }
 
     impl Commandable for Commando {
-        fn send_raw_command(&mut self, cmd: String) -> TncResult<()> {
-            println!("Got {}", cmd);
-            self.count += 1;
-            self.last = cmd;
+        fn send_raw_commands<I>(&mut self, cmds: I) -> TncResult<()>
+        where
+            I: IntoIterator<Item = String>,
+        {
+            for s in cmds {
+                self.count += 1;
+                self.last = s;
+            }
             Ok(())
         }
 
