@@ -2,5 +2,4 @@
 
 pub mod busylock;
 pub mod connevent;
-pub mod input;
-pub mod output;
+pub mod controlstream;
