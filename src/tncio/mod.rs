@@ -3,3 +3,4 @@
 pub mod busylock;
 pub mod connevent;
 pub mod controlstream;
+pub mod datastream;
