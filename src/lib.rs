@@ -10,6 +10,9 @@ extern crate enum_derive;
 extern crate nom;
 extern crate bytes;
 extern crate chrono;
+#[macro_use]
+extern crate futures;
+extern crate romio;
 
 pub mod commandchain;
 pub mod connectioninfo;
