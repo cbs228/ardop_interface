@@ -1,3 +1,4 @@
+#![feature(async_await, await_macro)]
 #![recursion_limit = "128"]
 #[allow(unused_imports)]
 #[macro_use]
