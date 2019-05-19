@@ -17,6 +17,7 @@ pub struct ConnEventParser {
     last_target: Option<String>,
     last_arq_state: State,
     is_connected: bool,
+    buffer: u64,
 }
 
 impl ConnEventParser {
@@ -36,6 +37,7 @@ impl ConnEventParser {
             last_target: None,
             last_arq_state: State::DISC,
             is_connected: false,
+            buffer: 0,
         }
     }
 
@@ -54,8 +56,11 @@ impl ConnEventParser {
     pub fn process(&mut self, event: Event) -> Option<ConnectionStateChange> {
         match event {
             Event::BUFFER(buf) => {
-                if self.is_connected {
-                    Some(ConnectionStateChange::OutgoingBuffer(buf))
+                let oldbuffer = self.buffer;
+                self.buffer = buf;
+
+                if buf > 0 || oldbuffer > 0 {
+                    Some(ConnectionStateChange::SendBuffer(buf))
                 } else {
                     None
                 }
@@ -165,5 +170,25 @@ mod test {
             Some(ConnectionStateChange::Failed(ConnectionFailedReason::NoAnswer)) => assert!(true),
             _ => assert!(false),
         }
+    }
+
+    #[test]
+    fn test_buffer() {
+        let mut evh = ConnEventParser::new("W0EME");
+        assert!(evh.process(Event::BUFFER(0)).is_none());
+        assert!(evh.process(Event::BUFFER(0)).is_none());
+        assert_eq!(
+            ConnectionStateChange::SendBuffer(10),
+            evh.process(Event::BUFFER(10)).unwrap()
+        );
+        assert_eq!(
+            ConnectionStateChange::SendBuffer(5),
+            evh.process(Event::BUFFER(5)).unwrap()
+        );
+        assert_eq!(
+            ConnectionStateChange::SendBuffer(0),
+            evh.process(Event::BUFFER(0)).unwrap()
+        );
+        assert!(evh.process(Event::BUFFER(0)).is_none());
     }
 }

@@ -82,26 +82,17 @@ pub enum ConnectionFailedReason {
 /// Announces a change in the ARQ connection state
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectionStateChange {
+    /// An open connection has been closed
+    ///
+    /// Connections may be closed by `DISCONNECT` tear-down
+    /// or by an `ABORT`. The loss of connection reason is
+    /// not enumerated here, however.
+    Closed,
+
     /// Successfully connected
     ///
     /// Data is information about the connection
     Connected(ConnectionInfo),
-
-    /// Reports size of the outgoing queue, in bytes
-    ///
-    /// After the TNC accepts responsibility for sending
-    /// ARQ bytes, it emits a `BUFFER` message indicating
-    /// the number of bytes buffered. As bytes are
-    /// transmitted, the `BUFFER` decreases. When the
-    /// buffer reaches zero, the TNC has sent all queued
-    /// data.
-    ///
-    /// If your application allows the buffer to empty, a
-    /// link turnover is more likely to occur.
-    ///
-    /// It is possible to wait for an empty buffer with
-    /// a call to `flush()`.
-    OutgoingBuffer(u64),
 
     /// Failed to connect
     ///
@@ -112,12 +103,19 @@ pub enum ConnectionStateChange {
     /// fail.
     Failed(ConnectionFailedReason),
 
-    /// An open connection has been closed
+    /// Reports on the progress of data transmission
     ///
-    /// Connections may be closed by `DISCONNECT` tear-down
-    /// or by an `ABORT`. The loss of connection reason is
-    /// not enumerated here, however.
-    Closed,
+    /// This message reports the current length of the
+    /// TNC's outbound `BUFFER`. When the `SendBuffer`
+    /// reaches zero, all enqueued data has been transmitted.
+    /// If your application allows the buffer to empty, a
+    /// link turnover is likely to occur.
+    ///
+    /// For ARQ connections, the `SendBuffer` counts the total
+    /// length of all un-ACK'd data. A `SendBuffer(0)` event
+    /// indicates that the peer has successfully received all
+    /// outstanding data.
+    SendBuffer(u64),
 }
 
 /// Event messages
