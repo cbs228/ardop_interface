@@ -11,6 +11,7 @@
 //! 1. If the parser matched anything contains `Some` `Response`,
 //!    which is further enumerated.
 
+use std::fmt;
 use std::str;
 use std::string::String;
 
@@ -77,6 +78,18 @@ pub enum ConnectionFailedReason {
 
     /// No answer from peer
     NoAnswer,
+}
+
+impl fmt::Display for ConnectionFailedReason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            ConnectionFailedReason::Busy => write!(f, "busy channel"),
+            ConnectionFailedReason::IncompatibleBandwidth => {
+                write!(f, "rejected by peer: incompatible bandwidth")
+            }
+            ConnectionFailedReason::NoAnswer => write!(f, "no answer from peer"),
+        }
+    }
 }
 
 /// Announces a change in the ARQ connection state

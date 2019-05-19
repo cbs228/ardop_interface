@@ -12,6 +12,8 @@ extern crate bytes;
 extern crate chrono;
 #[macro_use]
 extern crate futures;
+#[macro_use]
+extern crate log;
 extern crate async_timer;
 extern crate romio;
 
