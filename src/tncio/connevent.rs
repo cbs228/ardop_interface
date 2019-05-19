@@ -41,6 +41,35 @@ impl ConnEventParser {
         }
     }
 
+    /// Reset to zero initial conditions
+    ///
+    /// Reset the event parser to zero initial conditions. This
+    /// method should be invoked before sending an `INITIALIZE`
+    /// command to the TNC.
+    pub fn reset(&mut self) {
+        self.last_target = None;
+        self.last_arq_state = State::DISC;
+        self.is_connected = false;
+        self.buffer = 0;
+    }
+
+    /// True if an ARQ connection is connected
+    ///
+    /// # Returns
+    /// `true` if an ongoing ARQ connection existed after the
+    /// last call to `ConnEventParser::process()`.
+    pub fn is_connected(&self) -> bool {
+        self.is_connected
+    }
+
+    /// Get this station's callsign
+    ///
+    /// # Returns
+    /// The formally assigned callsign for this station.
+    pub fn mycall(&self) -> &String {
+        return &self.mycall;
+    }
+
     /// Process an event
     ///
     /// Processes an event notification received asynchronously
@@ -135,6 +164,7 @@ mod test {
             }
             _ => assert!(false),
         };
+        assert!(evh.is_connected());
     }
 
     #[test]
@@ -152,6 +182,7 @@ mod test {
             }
             _ => assert!(false),
         };
+        assert!(evh.is_connected());
     }
 
     #[test]
@@ -163,6 +194,7 @@ mod test {
             Some(ConnectionStateChange::Closed) => assert!(true),
             _ => assert!(false),
         }
+        assert_eq!(false, evh.is_connected());
 
         evh.process(Event::NEWSTATE(State::ISS));
         let e2 = evh.process(Event::NEWSTATE(State::DISC));
@@ -170,6 +202,7 @@ mod test {
             Some(ConnectionStateChange::Failed(ConnectionFailedReason::NoAnswer)) => assert!(true),
             _ => assert!(false),
         }
+        assert_eq!(false, evh.is_connected());
     }
 
     #[test]
