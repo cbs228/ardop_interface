@@ -101,7 +101,7 @@ pub enum ConnectionStateChange {
     ///
     /// It is possible to wait for an empty buffer with
     /// a call to `flush()`.
-    OutgoingBuffer(u16),
+    OutgoingBuffer(u64),
 
     /// Failed to connect
     ///
@@ -131,7 +131,7 @@ pub enum Event {
     /// Length of the data that is currently in the process of being
     /// transmitted. Includes data not yet acknowledged by the receiving
     /// station.
-    BUFFER(u16),
+    BUFFER(u64),
 
     /// Indicates that the RF channel has become busy (or not)
     BUSY(bool),
@@ -389,7 +389,7 @@ named!(
     do_parse!(
         tag!(r"BUFFER") >>
         take_while!(is_space) >>
-        aa: parse_u16 >>
+        aa: parse_u64 >>
         (Response::Event(Event::BUFFER(aa)))
     )
 );
@@ -580,6 +580,14 @@ named!(
     map_res!(
       take_while!(is_numeric),
       |s: CompleteStr| (*s).parse::<u16>()
+    )
+);
+
+named!(
+    parse_u64<CompleteStr, u64>,
+    map_res!(
+      take_while!(is_numeric),
+      |s: CompleteStr| (*s).parse::<u64>()
     )
 );
 
