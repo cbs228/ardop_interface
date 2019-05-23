@@ -1,184 +1,200 @@
-//! Busy channel waiting
+//! Clear/busy channel detection
 //!
-//! ARDOP provides busy channel detection which will prevent
-//! outgoing transmissions when `BUSY TRUE` is received. At
-//! present, tested implementations won't always do this,
-//! and they might not buffer transmissions for later sending
-//! at that.
+//! While the ARDOP TNC has a free/busy channel detector, the
+//! timing of when to submit a new outgoing transmission
+//! (FEC or ARQ) is up to the client. Clients must tightly time
+//! free / busy events (`BUSY FALSE` / `BUSY TRUE`) and wait
+//! "long enough" for a clear channel.
 //!
-//! Implement a thread-safe mechanism for blocking until
-//! `BUSY FALSE` is received. The client thread should use
-//! `BusyLockReceive::wait_clear_for()` to wait for a clear
-//! channel.
+//! This method provides a task which will grab a mutex whenever
+//! the channel is busy. The mutex is dropped whenever the channel
+//! has become clear for long enough. "Long enough" is controlled
+//! by the caller.
 
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
-/// Create new busy lock send/receive pair
+use futures::prelude::*;
+
+use futures::channel::oneshot;
+use futures::lock::{Mutex, MutexGuard};
+use futures::stream::Stream;
+
+use async_timer::Timed;
+
+use crate::protocol::response::Event;
+
+/// Busy/clear channel detector task
 ///
-/// The busy lock is used to provide inter-thread notifications
-/// of the channel busy state. The sender is intended to be
-/// paired with an `EventHandler`. The receiver may be cloned to
-/// any number of threads which are interested in the busy state.
+/// This method should be run as a task. It will run until the `src`
+/// stream is exhausted. TNC `BUSY` events will cause this task to
+/// take the `busy_lock` mutex and hold it until the channel becomes
+/// clear for at least `clear_time`. Other events will be passed
+/// through to the `dst` queue immediately.
 ///
-/// # Returns
-/// 0. The sending side of the busy channel notifier
-/// 1. The receiving side of the busy channel notifier
-pub fn new() -> (Arc<BusyLock>, Arc<BusyLock>) {
-    let bls = BusyLock::new();
-    let bls2 = bls.clone();
-    (bls, bls2)
-}
+/// When `busy_lock` is held by this method, the channel is busy. When
+/// `busy_lock` is not held, the channel is clear. Callers *MUST AVOID*
+/// holding on to the `busy_lock` for too long, as doing this may block
+/// additional events from being processed.
+///
+/// # Parameters
+/// - `src`: Stream source of events
+/// - `dst`: Non-busy events will be forwarded here
+/// - `busy_lock`: A futures-aware mutex for busy channel indication
+/// - `clear_time`: Minimum time that channel must be clear. If zero,
+///   the channel will be declared clear immediately on receipt of
+///   a `BUSY FALSE` event.
+/// - `run_notify`: If given, will write a single empty value to
+///   this channel when the first Event is processed from `src`.
+///   This can be used to synchronize the startup of this task,
+///   which is mainly useful for tests.
+#[allow(unused_variables)]
+#[allow(unused_assignments)]
+pub async fn busy_lock_task<S, K>(
+    mut src: S,
+    mut dst: K,
+    busy_lock: Arc<Mutex<()>>,
+    clear_time: Duration,
+    mut run_notify: Option<oneshot::Sender<()>>,
+) where
+    S: Stream<Item = Event> + Unpin,
+    K: Sink<Event> + Unpin,
+{
+    // take the lock on startup
+    let mut busy_when_held: Option<MutexGuard<()>> = Some(await!(busy_lock.lock()));
+    let mut will_be_clear = true;
 
-/// Waits for a busy channel to become clear
-#[derive(Debug)]
-pub struct BusyLock {
-    // busy true/false and time of last state transition
-    busy: Mutex<(bool, Instant)>,
-    notify: Condvar,
-}
-
-impl BusyLock {
-    fn new() -> Arc<BusyLock> {
-        Arc::new(BusyLock {
-            busy: Mutex::new((false, Instant::now())),
-            notify: Condvar::new(),
-        })
+    // if the clear time is zero, we will not timeout while
+    // waiting for events
+    let immediately_clear = clear_time == Duration::from_secs(0);
+    if immediately_clear {
+        busy_when_held = None;
     }
 
-    /// Sets the current busy state
-    ///
-    /// Updates the current busy/clear state from the TNC.
-    /// For use only by the I/O thread.
-    ///
-    /// # Parameters
-    /// - `busy`: True if channel is busy, or false if it is
-    ///   clear
-    pub fn set_busy(&self, is_busy: bool) {
-        let mut busy = self.busy.lock().unwrap();
-        *busy = (is_busy, Instant::now());
+    loop {
+        // if clear_time is zero, or we are already clear, don't timeout
+        let res = if immediately_clear || busy_when_held.is_none() {
+            Ok(await!(src.next()))
+        } else {
+            await!(Timed::platform_new(src.next(), clear_time.clone()))
+        };
 
-        // notify any state transition
-        self.notify.notify_all();
-    }
-
-    /// Waits for a clear channel
-    ///
-    /// Waits until the TNC has declared the channel to be clear
-    /// (i.e., `BUSY FALSE`) for a time interval of at least
-    /// `clear`. This method *may* block for up to (about) `timeout`
-    /// seconds and will return false if no clear channel is detected
-    /// during that time frame.
-    ///
-    /// # Parameters
-    /// - `clear`: Required *contiguous* duration during which
-    ///   the channel must be clear
-    /// - `timeout`: Total time to wait before giving up
-    /// - `poll`: Poll for a clear channel at this interval.
-    ///   For best results, `poll` < `timeout`.
-    ///
-    /// # Return
-    /// `true` if the channel has become clear for at least `clear`
-    /// time units, or `false` if the channel did not become clear
-    /// during the specified `timeout` period.
-    pub fn wait_clear_for(&self, clear: Duration, timeout: Duration, poll: Duration) -> bool {
-        // try an immediate check first
-        {
-            let mtx = self.busy.lock().unwrap();
-            let busyat = *mtx;
-            if !busyat.0 && busyat.1.elapsed() >= clear {
-                // have been clear for required period of time
-                return true;
+        match res {
+            Ok(Some(Event::BUSY(true))) => {
+                // grab the lock, if we don't have it
+                if busy_when_held.is_none() {
+                    busy_when_held = Some(await!(busy_lock.lock()));
+                }
+                will_be_clear = false;
+            }
+            Ok(Some(Event::BUSY(false))) => {
+                // we will be clear on next timeout
+                will_be_clear = true;
+                if immediately_clear {
+                    // channel declared clear immediately
+                    busy_when_held = None;
+                }
+            }
+            Ok(Some(evt)) => {
+                // Other events go to dst. Send errors cause
+                // task termination.
+                match await!(dst.send(evt)) {
+                    Ok(()) => { /* no-op */ }
+                    Err(_e) => break,
+                }
+            }
+            Err(_timeout) => {
+                if will_be_clear {
+                    // drop the lock
+                    busy_when_held = None;
+                }
+            }
+            Ok(None) => {
+                // stream exhausted -> terminate
+                break;
             }
         }
 
-        // failed, so we must wait
-        let start = Instant::now();
-        loop {
-            let result = self
-                .notify
-                .wait_timeout(self.busy.lock().unwrap(), poll)
-                .unwrap();
-
-            let busyat = *result.0;
-            if !busyat.0 && busyat.1.elapsed() >= clear {
-                return true;
-            }
-
-            // timeout elapsed with negative result
-            if start.elapsed() > timeout {
-                return false;
-            }
+        // we are now running
+        if run_notify.is_some() {
+            run_notify.take().unwrap().send(()).unwrap();
         }
-    }
-
-    /// Gets the current busy state
-    ///
-    /// Atomically obtains the current busy state. To wait on
-    /// a clear channel, use `BusyLock::wait()` instead.
-    pub fn busy(&self) -> bool {
-        (*self.busy.lock().unwrap()).0
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::thread;
+
+    use futures::channel::mpsc;
+    use futures::executor;
+    use futures::executor::ThreadPool;
+    use futures::task::SpawnExt;
 
     #[test]
-    fn test_wait_clear_for() {
-        let bl1 = BusyLock::new();
-        let bl2 = bl1.clone();
+    fn test_exit() {
+        let busy = Arc::new(Mutex::new(()));
+        let (mut evt_in_snd, evt_in_rx) = mpsc::unbounded();
+        let (evt_out_snd, _evt_out_rx) = mpsc::unbounded();
+        let (start_snd, start_rx) = oneshot::channel();
 
-        // times out
-        bl1.set_busy(true);
-        let t2 = thread::spawn(move || {
-            let res = bl2.wait_clear_for(
-                Duration::from_millis(0),
-                Duration::from_millis(1),
-                Duration::from_millis(1),
-            );
-            assert_eq!(res, false);
-        });
-        t2.join().unwrap();
+        let mut pool = ThreadPool::new().unwrap();
+        pool.spawn(busy_lock_task(
+            evt_in_rx,
+            evt_out_snd,
+            busy.clone(),
+            Duration::from_secs(120),
+            Some(start_snd),
+        ))
+        .unwrap();
 
-        // becomes clear before timeout
-        let bl3 = bl1.clone();
-        let t2 = thread::spawn(move || {
-            let res = bl3.wait_clear_for(
-                Duration::from_millis(0),
-                Duration::from_millis(1000),
-                Duration::from_millis(20),
-            );
-            assert_eq!(res, true);
-        });
-        bl1.set_busy(false);
-        t2.join().unwrap();
+        executor::block_on(async {
+            // send the first event (we're busy)
+            await!(evt_in_snd.send(Event::BUSY(true))).unwrap();
 
-        // clear, but not for long enough
-        bl1.set_busy(false);
-        let bl4 = bl1.clone();
-        let t2 = thread::spawn(move || {
-            let res = bl4.wait_clear_for(
-                Duration::from_millis(100000),
-                Duration::from_millis(1),
-                Duration::from_millis(20),
-            );
-            assert_eq!(res, false);
-        });
-        t2.join().unwrap();
+            // once running...
+            let _ = await!(start_rx).unwrap();
+            // ... we can't get the lock
+            assert!(busy.try_lock().is_none());
 
-        // clear right away
-        let bl5 = bl1.clone();
-        let t2 = thread::spawn(move || {
-            let res = bl5.wait_clear_for(
-                Duration::from_millis(0),
-                Duration::from_millis(0),
-                Duration::from_millis(1),
-            );
-            assert_eq!(res, true);
+            // close channel -> kills task
+            evt_in_snd.close_channel();
+
+            // and now we can get the lock
+            await!(busy.lock());
         });
-        t2.join().unwrap();
+    }
+
+    #[test]
+    fn test_becomes_clear() {
+        let busy = Arc::new(Mutex::new(()));
+        let (mut evt_in_snd, evt_in_rx) = mpsc::unbounded();
+        let (evt_out_snd, _evt_out_rx) = mpsc::unbounded();
+        let (start_snd, start_rx) = oneshot::channel();
+
+        let mut pool = ThreadPool::new().unwrap();
+        pool.spawn(busy_lock_task(
+            evt_in_rx,
+            evt_out_snd,
+            busy.clone(),
+            Duration::from_millis(2),
+            Some(start_snd),
+        ))
+        .unwrap();
+
+        executor::block_on(async {
+            // initially busy
+            await!(evt_in_snd.send(Event::BUSY(true))).unwrap();
+            let _ = await!(start_rx).unwrap();
+
+            // becomes clear
+            await!(evt_in_snd.send(Event::BUSY(false))).unwrap();
+
+            // and now we can get the lock, eventually
+            await!(busy.lock());
+
+            // close channel -> kills task
+            evt_in_snd.close_channel();
+        });
     }
 }
