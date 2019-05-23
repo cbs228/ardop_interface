@@ -1,7 +1,13 @@
 use std::convert::From;
 use std::fmt;
 use std::io;
+use std::pin::Pin;
 use std::string::String;
+
+use futures::prelude::*;
+
+use async_timer::timed::Expired;
+use async_timer::Oneshot;
 
 use crate::protocol::response::CommandResult;
 
@@ -43,5 +49,15 @@ impl From<CommandResult> for TncError {
 impl From<io::Error> for TncError {
     fn from(e: io::Error) -> Self {
         TncError::IoError(e)
+    }
+}
+
+impl<F, T> From<Expired<F, T>> for TncError
+where
+    F: Future + Unpin,
+    T: Oneshot,
+{
+    fn from(_e: Expired<F, T>) -> Self {
+        TncError::CommandTimeout
     }
 }

@@ -12,6 +12,7 @@ extern crate bytes;
 extern crate chrono;
 #[macro_use]
 extern crate futures;
+extern crate async_timer;
 extern crate romio;
 
 pub mod commandchain;
