@@ -1,7 +1,6 @@
 use std::convert::From;
 use std::fmt;
 use std::io;
-use std::pin::Pin;
 use std::string::String;
 
 use futures::prelude::*;
@@ -9,6 +8,7 @@ use futures::prelude::*;
 use async_timer::timed::Expired;
 use async_timer::Oneshot;
 
+use crate::protocol::constants::CommandID;
 use crate::protocol::response::CommandResult;
 
 /// Errors raised by the `Tnc` interface
@@ -16,6 +16,9 @@ use crate::protocol::response::CommandResult;
 pub enum TncError {
     /// TNC rejected a command with a `FAULT` message
     CommandFailed(String),
+
+    /// The TNC sent a response that does not belong to our command
+    CommandResponseInvalid(CommandID, CommandID),
 
     /// TNC failed to respond in a timely manner
     CommandTimeout,
@@ -31,6 +34,11 @@ impl fmt::Display for TncError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             TncError::CommandFailed(s) => write!(f, "TNC command failed: \"{}\"", s),
+            TncError::CommandResponseInvalid(expect, got) => write!(
+                f,
+                "TNC sent a malformed command response: expected \"{}\" but got \"{}\"",
+                expect, got
+            ),
             TncError::CommandTimeout => write!(f, "TNC command timed out"),
             TncError::IoError(e) => write!(f, "IO Error: {}", e),
         }
