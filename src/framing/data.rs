@@ -103,11 +103,11 @@ mod test {
         exec.run(async {
             assert_eq!(
                 DataIn::ARQ(Bytes::from("HELLO")),
-                await!(framer.next()).unwrap()
+                framer.next().await.unwrap()
             );
             assert_eq!(
                 DataIn::FEC(Bytes::from("WORLD")),
-                await!(framer.next()).unwrap()
+                framer.next().await.unwrap()
             );
         });
     }

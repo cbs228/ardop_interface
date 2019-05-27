@@ -236,17 +236,17 @@ mod test {
         let (mut evt, mut res, _out) = controlstream(curs);
 
         executor::block_on(async {
-            let e1 = await!(evt.next()).unwrap();
+            let e1 = evt.next().await.unwrap();
             assert_eq!(Event::BUSY(true), e1);
 
-            let r1 = await!(res.next()).unwrap();
+            let r1 = res.next().await.unwrap();
             assert_eq!(Ok((CommandID::MYCALL, None)), r1);
 
-            let r2 = await!(res.next()).unwrap();
+            let r2 = res.next().await.unwrap();
             assert_eq!(Ok((CommandID::ARQBW, None)), r2);
 
-            assert!(await!(res.next()).is_none());
-            assert!(await!(evt.next()).is_none());
+            assert!(res.next().await.is_none());
+            assert!(evt.next().await.is_none());
         });
     }
 

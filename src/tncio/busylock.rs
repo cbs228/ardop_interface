@@ -61,7 +61,7 @@ pub async fn busy_lock_task<S, K>(
     K: Sink<Event> + Unpin,
 {
     // take the lock on startup
-    let mut busy_when_held: Option<MutexGuard<()>> = Some(await!(busy_lock.lock()));
+    let mut busy_when_held: Option<MutexGuard<()>> = Some(busy_lock.lock().await);
     let mut will_be_clear = true;
 
     // if the clear time is zero, we will not timeout while
@@ -74,16 +74,16 @@ pub async fn busy_lock_task<S, K>(
     loop {
         // if clear_time is zero, or we are already clear, don't timeout
         let res = if immediately_clear || busy_when_held.is_none() {
-            Ok(await!(src.next()))
+            Ok(src.next().await)
         } else {
-            await!(Timed::platform_new(src.next(), clear_time.clone()))
+            Timed::platform_new(src.next(), clear_time.clone()).await
         };
 
         match res {
             Ok(Some(Event::BUSY(true))) => {
                 // grab the lock, if we don't have it
                 if busy_when_held.is_none() {
-                    busy_when_held = Some(await!(busy_lock.lock()));
+                    busy_when_held = Some(busy_lock.lock().await);
                 }
                 will_be_clear = false;
             }
@@ -98,7 +98,7 @@ pub async fn busy_lock_task<S, K>(
             Ok(Some(evt)) => {
                 // Other events go to dst. Send errors cause
                 // task termination.
-                match await!(dst.send(evt)) {
+                match dst.send(evt).await {
                     Ok(()) => { /* no-op */ }
                     Err(_e) => break,
                 }
@@ -150,10 +150,10 @@ mod test {
 
         executor::block_on(async {
             // send the first event (we're busy)
-            await!(evt_in_snd.send(Event::BUSY(true))).unwrap();
+            evt_in_snd.send(Event::BUSY(true)).await.unwrap();
 
             // once running...
-            let _ = await!(start_rx).unwrap();
+            let _ = start_rx.await.unwrap();
             // ... we can't get the lock
             assert!(busy.try_lock().is_none());
 
@@ -161,7 +161,7 @@ mod test {
             evt_in_snd.close_channel();
 
             // and now we can get the lock
-            await!(busy.lock());
+            busy.lock().await;
         });
     }
 
@@ -184,14 +184,14 @@ mod test {
 
         executor::block_on(async {
             // initially busy
-            await!(evt_in_snd.send(Event::BUSY(true))).unwrap();
-            let _ = await!(start_rx).unwrap();
+            evt_in_snd.send(Event::BUSY(true)).await.unwrap();
+            let _ = start_rx.await.unwrap();
 
             // becomes clear
-            await!(evt_in_snd.send(Event::BUSY(false))).unwrap();
+            evt_in_snd.send(Event::BUSY(false)).await.unwrap();
 
             // and now we can get the lock, eventually
-            await!(busy.lock());
+            busy.lock().await;
 
             // close channel -> kills task
             evt_in_snd.close_channel();

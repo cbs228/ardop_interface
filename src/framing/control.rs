@@ -64,13 +64,13 @@ mod test {
 
         let mut exec = ThreadPool::new().expect("Failed to create threadpool");
         exec.run(async {
-            let e1 = await!(framer.next());
+            let e1 = framer.next().await;
             assert_eq!(Response::Event(Event::PENDING), e1.unwrap());
 
-            let e2 = await!(framer.next());
+            let e2 = framer.next().await;
             assert_eq!(Response::Event(Event::CANCELPENDING), e2.unwrap());
 
-            let e3 = await!(framer.next());
+            let e3 = framer.next().await;
             assert!(e3.is_none());
         });
     }
@@ -82,8 +82,8 @@ mod test {
 
         let mut exec = ThreadPool::new().expect("Failed to create threadpool");
         exec.run(async {
-            await!(framer.send("MYCALL W1AW\r".to_owned())).unwrap();
-            await!(framer.send("LISTEN TRUE\r".to_owned())).unwrap();
+            framer.send("MYCALL W1AW\r".to_owned()).await.unwrap();
+            framer.send("LISTEN TRUE\r".to_owned()).await.unwrap();
         });
         let (curs, _) = framer.release();
         assert_eq!(
@@ -99,13 +99,13 @@ mod test {
         let mut framer = Framed::new(curs, TncControlFraming::new());
 
         executor::block_on(async {
-            let e1 = await!(framer.next());
+            let e1 = framer.next().await;
             assert_eq!(Response::Event(Event::PENDING), e1.unwrap());
 
-            let e2 = await!(framer.next());
+            let e2 = framer.next().await;
             assert_eq!(Response::Event(Event::CANCELPENDING), e2.unwrap());
 
-            let e3 = await!(framer.next());
+            let e3 = framer.next().await;
             assert!(e3.is_none());
         });
 
@@ -113,8 +113,8 @@ mod test {
         let mut framer = Framed::new(curs, TncControlFraming::new());
 
         executor::block_on(async {
-            await!(framer.send("MYCALL W1AW\r".to_owned())).unwrap();
-            await!(framer.send("LISTEN TRUE\r".to_owned())).unwrap();
+            framer.send("MYCALL W1AW\r".to_owned()).await.unwrap();
+            framer.send("LISTEN TRUE\r".to_owned()).await.unwrap();
         });
         let (curs, _) = framer.release();
         assert_eq!(
