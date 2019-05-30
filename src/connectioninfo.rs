@@ -2,8 +2,6 @@ use std::convert::Into;
 use std::fmt;
 use std::string::String;
 
-use chrono::prelude::*;
-
 /// Connection direction
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Direction {
@@ -22,26 +20,25 @@ pub enum Direction {
 }
 
 /// Represents an ARQ connection
+///
+/// `ConnectionInfo` are immutable once created.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConnectionInfo {
     /// Connected peer callsign
-    pub peer_call: String,
+    peer_call: String,
 
     /// Connected peer gridsquare, if known
-    pub peer_grid: Option<String>,
+    peer_grid: Option<String>,
 
     /// Connection bandwidth (Hz)
-    pub bandwidth: u16,
+    bandwidth: u16,
 
     /// Connection direction
-    pub direction: Direction,
-
-    /// Time connection established
-    pub established: DateTime<Utc>,
+    direction: Direction,
 }
 
 impl ConnectionInfo {
-    /// Record a new connection, opened now
+    /// Record a new connection
     ///
     /// Parameters
     /// - `peer_call`: Peer callsign
@@ -62,35 +59,32 @@ impl ConnectionInfo {
             peer_grid,
             bandwidth,
             direction,
-            established: Utc::now(),
         }
     }
 
-    /// Record a new connection, opened at some arbitrary time
+    /// Peer callsign
     ///
-    /// Parameters
-    /// - `peer_call`: Peer callsign
-    /// - `peer_grid`: Peer gridsquare, if known
-    /// - `bandwidth`: Connection bandwidth (Hz)
-    /// - `direction`: Connection direction
-    /// - `established`: Time that connection was opened
-    pub fn new_at<S>(
-        peer_call: S,
-        peer_grid: Option<String>,
-        bandwidth: u16,
-        direction: Direction,
-        established: DateTime<Utc>,
-    ) -> ConnectionInfo
-    where
-        S: Into<String>,
-    {
-        ConnectionInfo {
-            peer_call: peer_call.into(),
-            peer_grid,
-            bandwidth,
-            direction,
-            established,
-        }
+    /// For outgoing connections, this is the dialed
+    /// callsign and not how the peer identifies itself.
+    /// For incoming connections, this is how the
+    /// peer identifies itself.
+    pub fn peer_call(&self) -> &String {
+        &self.peer_call
+    }
+
+    /// Peer Maidenhead Grid Square, if reported
+    pub fn peer_grid(&self) -> &Option<String> {
+        &self.peer_grid
+    }
+
+    /// Connection bandwidth, in Hz
+    pub fn bandwidth(&self) -> u16 {
+        self.bandwidth
+    }
+
+    /// Connection direction (incoming vs outgoing)
+    pub fn direction(&self) -> &Direction {
+        &self.direction
     }
 }
 
@@ -105,23 +99,8 @@ impl fmt::Display for ConnectionInfo {
             Direction::Incoming(t) => t.as_str(),
         };
         match &self.peer_grid {
-            Some(grid) => write!(
-                f,
-                "{}>{} [{}][{} Hz][{}]",
-                fm,
-                to,
-                grid,
-                self.bandwidth,
-                self.established.format("%Y-%m-%d %H:%M:%SZ")
-            ),
-            None => write!(
-                f,
-                "{}>{} [????][{} Hz][{}]",
-                fm,
-                to,
-                self.bandwidth,
-                self.established.format("%Y-%m-%d %H:%M:%SZ")
-            ),
+            Some(grid) => write!(f, "{}>{} [{}][{} Hz]", fm, to, grid, self.bandwidth),
+            None => write!(f, "{}>{} [????][{} Hz]", fm, to, self.bandwidth),
         }
     }
 }

@@ -158,9 +158,9 @@ mod test {
         let e1 = evh.process(Event::CONNECTED("W1AW".to_owned(), 500, None));
         match e1 {
             Some(ConnectionStateChange::Connected(conn)) => {
-                assert_eq!(500, conn.bandwidth);
-                assert_eq!(Direction::Outgoing("W0EME".to_owned()), conn.direction);
-                assert_eq!("W1AW", conn.peer_call);
+                assert_eq!(500, conn.bandwidth());
+                assert_eq!(&Direction::Outgoing("W0EME".to_owned()), conn.direction());
+                assert_eq!("W1AW", conn.peer_call());
             }
             _ => assert!(false),
         };
@@ -176,9 +176,9 @@ mod test {
 
         match e1 {
             Some(ConnectionStateChange::Connected(conn)) => {
-                assert_eq!(500, conn.bandwidth);
-                assert_eq!(Direction::Incoming("W0EME-S".to_owned()), conn.direction);
-                assert_eq!("W1AW", conn.peer_call);
+                assert_eq!(500, conn.bandwidth());
+                assert_eq!(&Direction::Incoming("W0EME-S".to_owned()), conn.direction());
+                assert_eq!("W1AW", conn.peer_call());
             }
             _ => assert!(false),
         };
