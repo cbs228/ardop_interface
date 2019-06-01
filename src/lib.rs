@@ -14,6 +14,7 @@ extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate async_timer;
+extern crate num;
 extern crate romio;
 
 pub mod commandchain;
