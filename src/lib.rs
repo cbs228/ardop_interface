@@ -9,7 +9,6 @@ extern crate enum_derive;
 #[macro_use]
 extern crate nom;
 extern crate bytes;
-extern crate chrono;
 #[macro_use]
 extern crate futures;
 #[macro_use]
