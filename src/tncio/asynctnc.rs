@@ -11,6 +11,7 @@
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::string::String;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,7 +21,7 @@ use futures::io::{AsyncRead, AsyncWrite};
 use futures::lock::Mutex;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{Stream, StreamExt};
-use futures::task::SpawnExt;
+use futures::task::{Context, Poll, SpawnExt};
 
 use async_timer::Timed;
 
@@ -36,7 +37,7 @@ use crate::framing::data::TncDataFraming;
 use crate::framing::framer::Framed;
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::protocol::constants::ProtocolMode;
+use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{
     CommandOk, CommandResult, ConnectionFailedReason, ConnectionStateChange, Event,
 };
@@ -75,6 +76,7 @@ where
     busy_mutex: Arc<Mutex<()>>,
     control_timeout: Duration,
     event_timeout: Duration,
+    disconnect_progress: DisconnectProgress,
 }
 
 impl<I: 'static, P> AsyncTnc<I, P>
@@ -210,6 +212,7 @@ where
             busy_mutex,
             control_timeout: DEFAULT_TIMEOUT_COMMAND,
             event_timeout: DEFAULT_TIMEOUT_EVENT,
+            disconnect_progress: DisconnectProgress::NoProgress,
         }
     }
 
@@ -531,6 +534,40 @@ where
         }
     }
 
+    /// Perform disconnect by polling
+    ///
+    /// A polling method for disconnecting ARQ sessions. Call
+    /// this method until it returns `Ready` `Ok` to disconnect
+    /// any in-progress ARQ connection.
+    ///
+    /// If a task execution context is available, the async
+    /// method `AsyncTnc::disconnect()` may be a better
+    /// alternative to this method.
+    ///
+    /// # Parameters
+    /// - `cx`: Polling context
+    ///
+    /// # Return
+    /// * `Poll::Pending` if this method is waiting on I/O and
+    ///   needs to be re-polled
+    /// * `Poll::Ready(Ok(()))` if any in-progress ARQ connection
+    ///   is now disconnected
+    /// * `Poll::Ready(Err(e))` if the connection to the local
+    ///   ARDOP TNC has been interrupted.
+    pub fn poll_disconnect(&mut self, cx: &mut Context) -> Poll<io::Result<()>> {
+        match ready!(execute_disconnect(
+            &mut self.disconnect_progress,
+            cx,
+            &mut self.control_out,
+            &mut self.control_in_res,
+            &mut self.data_stream,
+        )) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(TncError::IoError(e)) => Poll::Ready(Err(e)),
+            Err(_tnc_err) => Poll::Ready(Err(connection_reset_err())),
+        }
+    }
+
     /// Query TNC version
     ///
     /// Queries the ARDOP TNC software for its version number.
@@ -594,7 +631,7 @@ where
                 Timed::platform_new(self.data_stream.next(), timeout.clone()).await?
             };
             match res {
-                None => return Err(connection_reset_err()),
+                None => return Err(TncError::IoError(connection_reset_err())),
                 Some(DataEvent::Event(event)) => return Ok(event),
                 Some(_data) => { /* consume it */ }
             }
@@ -631,7 +668,7 @@ where
 
     match Timed::platform_new(inp.next(), timeout.clone()).await? {
         // lost connection
-        None => Err(connection_reset_err()),
+        None => Err(TncError::IoError(connection_reset_err())),
         // TNC FAULT means our command has failed
         Some(Err(badcmd)) => Err(TncError::CommandFailed(badcmd)),
         Some(Ok((in_id, msg))) => {
@@ -649,11 +686,93 @@ where
     }
 }
 
-fn connection_reset_err() -> TncError {
-    TncError::IoError(io::Error::new(
+#[derive(Debug, Eq, PartialEq, Clone)]
+enum DisconnectProgress {
+    NoProgress,
+    SentDisconnect,
+    AckDisconnect,
+}
+
+// A polling function which drives the TNC to disconnection
+//
+// The AsyncWrite trait requires a polling disconnect. We can't
+// just run a future and be done with it. Rather than using all
+// of our fancy async methods, we have to write all the polling
+// logic to do disconnects "by hand."
+//
+// This method will return Pending while a disconnect is waiting
+// on I/O. When it returns Ready(Ok(())), the disconnect is
+// finished.
+fn execute_disconnect<K, S, E, Z>(
+    state: &mut DisconnectProgress,
+    cx: &mut Context<'_>,
+    ctrl_out: &mut K,
+    ctrl_in: &mut S,
+    evt_in: &mut E,
+) -> Poll<TncResult<()>>
+where
+    K: Sink<String, SinkError = Z> + Unpin,
+    S: Stream<Item = CommandResult> + Unpin,
+    E: Stream<Item = DataEvent> + Unpin,
+    crate::tncerror::TncError: std::convert::From<Z>,
+{
+    loop {
+        match state {
+            DisconnectProgress::NoProgress => {
+                // ready to send command?
+                ready!(Pin::new(&mut *ctrl_out).poll_ready(cx))?;
+
+                // send it
+                *state = DisconnectProgress::SentDisconnect;
+                Pin::new(&mut *ctrl_out).start_send(format!("{}", command::disconnect()))?;
+            }
+            DisconnectProgress::SentDisconnect => {
+                // try to flush the outgoing command
+                ready!(Pin::new(&mut *ctrl_out).poll_flush(cx))?;
+
+                // read the next command response
+                match ready!(Pin::new(&mut *ctrl_in).poll_next(cx)) {
+                    None => {
+                        // I/O error
+                        *state = DisconnectProgress::NoProgress;
+                        return Poll::Ready(Err(TncError::IoError(connection_reset_err())));
+                    }
+                    Some(Err(_e)) => {
+                        // probably already disconnected
+                        *state = DisconnectProgress::NoProgress;
+                        return Poll::Ready(Ok(()));
+                    }
+                    Some(Ok((CommandID::DISCONNECT, _msg))) => {
+                        // Command execution in progress.
+                        *state = DisconnectProgress::AckDisconnect;
+                    }
+                    Some(_ok) => {
+                        // not the right command response -- keep looking
+                    }
+                }
+            }
+            DisconnectProgress::AckDisconnect => {
+                match ready!(Pin::new(&mut *evt_in).poll_next(cx)) {
+                    None => {
+                        *state = DisconnectProgress::NoProgress;
+                        return Poll::Ready(Err(TncError::IoError(connection_reset_err())));
+                    }
+                    Some(DataEvent::Event(ConnectionStateChange::Closed)) => {
+                        *state = DisconnectProgress::NoProgress;
+                        return Poll::Ready(Ok(()));
+                    }
+                    Some(_dataevt) => { /* no-op; keep waiting */ }
+                }
+            }
+        }
+    }
+}
+
+fn connection_reset_err() -> io::Error {
+    io::Error::new(
         io::ErrorKind::ConnectionReset,
         "Lost connection to ARDOP TNC",
-    ))
+    )
 }
 
 #[cfg(test)]
@@ -662,10 +781,12 @@ mod test {
 
     use std::io::Cursor;
 
+    use futures::channel::mpsc;
     use futures::executor;
     use futures::executor::LocalPool;
     use futures::sink;
     use futures::stream;
+    use futures::task;
 
     use crate::protocol::constants::CommandID;
 
@@ -783,6 +904,82 @@ mod test {
 
             assert!(tnc.data_stream().next().await.is_none());
         });
+    }
+
+    #[test]
+    fn test_execute_disconnect() {
+        let mut cx = Context::from_waker(task::noop_waker_ref());
+
+        let (mut ctrl_out_snd, mut ctrl_out_rx) = mpsc::unbounded();
+        let (ctrl_in_snd, mut ctrl_in_rx) = mpsc::unbounded();
+        let (evt_in_snd, mut evt_in_rx) = mpsc::unbounded();
+
+        // starts disconnection, but no connection in progress
+        let mut state = DisconnectProgress::NoProgress;
+        ctrl_in_snd
+            .unbounded_send(Err("not from state".to_owned()))
+            .unwrap();
+        match execute_disconnect(
+            &mut state,
+            &mut cx,
+            &mut ctrl_out_snd,
+            &mut ctrl_in_rx,
+            &mut evt_in_rx,
+        ) {
+            Poll::Ready(Ok(())) => assert!(true),
+            _ => assert!(false),
+        }
+        assert_eq!(DisconnectProgress::NoProgress, state);
+
+        // starts disconnection
+        state = DisconnectProgress::NoProgress;
+        match execute_disconnect(
+            &mut state,
+            &mut cx,
+            &mut ctrl_out_snd,
+            &mut ctrl_in_rx,
+            &mut evt_in_rx,
+        ) {
+            Poll::Pending => assert!(true),
+            _ => assert!(false),
+        }
+        assert_eq!(DisconnectProgress::SentDisconnect, state);
+        let _ = ctrl_out_rx.try_next().unwrap();
+
+        // make progress towards disconnection
+        ctrl_in_snd
+            .unbounded_send(Ok((CommandID::DISCONNECT, None)))
+            .unwrap();
+        match execute_disconnect(
+            &mut state,
+            &mut cx,
+            &mut ctrl_out_snd,
+            &mut ctrl_in_rx,
+            &mut evt_in_rx,
+        ) {
+            Poll::Pending => assert!(true),
+            _ => assert!(false),
+        }
+        assert_eq!(DisconnectProgress::AckDisconnect, state);
+
+        // finish disconnect
+        evt_in_snd
+            .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(0)))
+            .unwrap();
+        evt_in_snd
+            .unbounded_send(DataEvent::Event(ConnectionStateChange::Closed))
+            .unwrap();
+        match execute_disconnect(
+            &mut state,
+            &mut cx,
+            &mut ctrl_out_snd,
+            &mut ctrl_in_rx,
+            &mut evt_in_rx,
+        ) {
+            Poll::Ready(Ok(())) => assert!(true),
+            _ => assert!(false),
+        }
+        assert_eq!(DisconnectProgress::NoProgress, state);
     }
 
 }

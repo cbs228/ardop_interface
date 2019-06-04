@@ -3,6 +3,7 @@ use std::fmt;
 use std::io;
 use std::string::String;
 
+use futures::channel::mpsc::{SendError, TrySendError};
 use futures::prelude::*;
 
 use async_timer::timed::Expired;
@@ -60,6 +61,18 @@ impl From<io::Error> for TncError {
     }
 }
 
+impl From<SendError> for TncError {
+    fn from(_e: SendError) -> Self {
+        TncError::IoError(connection_reset_err())
+    }
+}
+
+impl<T> From<TrySendError<T>> for TncError {
+    fn from(_e: TrySendError<T>) -> Self {
+        TncError::IoError(connection_reset_err())
+    }
+}
+
 impl<F, T> From<Expired<F, T>> for TncError
 where
     F: Future + Unpin,
@@ -68,4 +81,11 @@ where
     fn from(_e: Expired<F, T>) -> Self {
         TncError::CommandTimeout
     }
+}
+
+fn connection_reset_err() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::ConnectionReset,
+        "Lost connection to ARDOP TNC",
+    )
 }
