@@ -64,7 +64,7 @@ mod test {
     use futures::executor::ThreadPool;
     use futures::prelude::*;
 
-    use super::super::framer::FramedRead;
+    use super::super::framer::Framed;
 
     #[test]
     fn test_encode() {
@@ -98,7 +98,7 @@ mod test {
     fn test_decode() {
         let words = b"ARQ\x00\x05HELLOFEC\x00\x05WORLDERR".to_vec();
         let curs = Cursor::new(words);
-        let mut framer = FramedRead::new(curs, TncDataFraming::new());
+        let mut framer = Framed::new(curs, TncDataFraming::new());
         let mut exec = ThreadPool::new().expect("Failed to create threadpool");
         exec.run(async {
             assert_eq!(
