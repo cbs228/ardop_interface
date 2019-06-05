@@ -183,6 +183,10 @@ impl ArqState {
     /// This method does not and cannot start a disconnect.
     /// Higher-level logic is responsible for this behavior.
     pub fn shutdown_write(&mut self) {
+        if !self.closed_write {
+            info!(target:"ARQ", "Sending disconnect request to peer ({})",
+                  self.info.peer_call());
+        }
         self.closed_write = true;
     }
 
@@ -258,9 +262,8 @@ impl ArqState {
     /// be sent to the TNC for transmission.
     ///
     /// # Parameters
-    /// - `dst`: Sink for outgoing data
-    /// - `src`: Source of incoming events and data. Needed to
-    ///   update the outgoing `BUFFER` size
+    /// - `io`: Sink for outgoing data and Stream of incoming
+    ///   events and data.
     /// - `cx`: Async Context
     /// - `buf`: Payload data to send
     ///
@@ -276,16 +279,14 @@ impl ArqState {
     ///
     /// Note that this method does not guarantee that the bytes have
     /// been, or ever will be, delivered to the remote peer.
-    pub fn poll_write<K, S>(
+    pub fn poll_write<K>(
         &mut self,
-        dst: &mut K,
-        src: &mut S,
+        io: &mut K,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>>
     where
-        K: Sink<DataOut> + Unpin,
-        S: Stream<Item = DataEvent> + Unpin,
+        K: Sink<DataOut> + Stream<Item = DataEvent> + Unpin,
     {
         if self.closed_write {
             return Poll::Ready(Err(broken_pipe_err()));
@@ -298,12 +299,12 @@ impl ArqState {
             // Try to flush. If we haven't flushed, then
             // apply backpressure and don't accept any more
             // bytes.
-            ready!(self.poll_flush(dst, src, cx))?;
+            ready!(self.poll_flush(io, cx))?;
         }
 
         // check if the outgoing framer is ready for more data
         // returns Poll::Pending if not
-        match ready!(Pin::new(&mut *dst).poll_ready(cx)) {
+        match ready!(Pin::new(&mut *io).poll_ready(cx)) {
             Ok(_ok) => (),
             Err(_err) => return Poll::Ready(Err(connection_reset_err())),
         }
@@ -311,14 +312,14 @@ impl ArqState {
         // enqueue the bytes for sending
         let bytes_out = Bytes::from(buf);
         let bytes_len = bytes_out.len();
-        match Pin::new(&mut *dst).start_send(bytes_out) {
+        match Pin::new(&mut *io).start_send(bytes_out) {
             Ok(_ok) => (),
             Err(_err) => return Poll::Ready(Err(connection_reset_err())),
         }
         self.bytecount_tx_staged += bytes_len as u64;
 
         // try to flush the bytes out of the TCP connection
-        match Pin::new(&mut *dst).poll_flush(cx) {
+        match Pin::new(&mut *io).poll_flush(cx) {
             Poll::Pending => Poll::Ready(Ok(bytes_len as usize)),
             Poll::Ready(Ok(())) => Poll::Ready(Ok(bytes_len as usize)),
             Poll::Ready(Err(_e)) => Poll::Ready(Err(connection_reset_err())),
@@ -332,9 +333,8 @@ impl ArqState {
     /// connection has failed or dropped.
     ///
     /// # Parameters
-    /// - `dst`: Sink for outgoing data
-    /// - `src`: Source of incoming events and data. Needed to
-    ///   update the outgoing `BUFFER` size
+    /// - `io`: Sink for outgoing data and Stream of incoming
+    ///   events and data.
     /// - `cx`: Async Context
     ///
     /// # Returns
@@ -346,15 +346,9 @@ impl ArqState {
     /// buffer is full, and the send cannot proceed. If this method
     /// returns `Poll::Ready`, then the entirety of `buf` has been
     /// accepted for transmission.
-    pub fn poll_flush<K, S>(
-        &mut self,
-        dst: &mut K,
-        src: &mut S,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>>
+    pub fn poll_flush<K>(&mut self, io: &mut K, cx: &mut Context<'_>) -> Poll<io::Result<()>>
     where
-        K: Sink<DataOut> + Unpin,
-        S: Stream<Item = DataEvent> + Unpin,
+        K: Sink<DataOut> + Stream<Item = DataEvent> + Unpin,
     {
         loop {
             if self.closed_read {
@@ -367,14 +361,14 @@ impl ArqState {
 
             // Try to flush some data out of TCP connection
             if self.bytecount_tx_staged > 0 {
-                match ready!(Pin::new(&mut *dst).poll_flush(cx)) {
+                match ready!(Pin::new(&mut *io).poll_flush(cx)) {
                     Ok(_ok) => (),
                     Err(_err) => return Poll::Ready(Err(connection_reset_err())),
                 }
             }
 
             // Try to update the tx byte counts
-            ready!(self.poll_next_dataevent(src, cx, false))?;
+            ready!(self.poll_next_dataevent(io, cx, false))?;
 
             if self.bytecount_tx_unacknowledged + self.bytecount_tx_staged <= 0 {
                 debug!(target:"ARQ", "All buffered data flushed to peer.");
@@ -531,8 +525,9 @@ mod test {
     use super::*;
 
     use futures::channel::mpsc;
-    use futures::sink;
+    use futures::sink::Sink;
     use futures::stream;
+    use futures::stream::Stream;
     use futures::task;
 
     use crate::connectioninfo::Direction;
@@ -620,10 +615,11 @@ mod test {
         let mut arq = ArqState::new(nfo);
         let mut waker = Context::from_waker(task::noop_waker_ref());
 
-        let (evt_wr, mut evt_rd) = mpsc::unbounded();
-        let mut data_sink = sink::drain(); // om nom nom
+        let (evt_wr, evt_rd) = mpsc::unbounded();
 
-        let res = arq.poll_write(&mut data_sink, &mut evt_rd, &mut waker, b"HELLO");
+        let mut data_sinkstream = StreamDrain::new(evt_rd);
+
+        let res = arq.poll_write(&mut data_sinkstream, &mut waker, b"HELLO");
 
         // our mock TNC has consumed the bytes... but not transmitted them yet
         match res {
@@ -635,7 +631,7 @@ mod test {
         assert_eq!(0, arq.bytes_transmitted());
 
         // flushes fail to make progress
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Pending => assert!(true),
             _ => assert!(false),
         }
@@ -647,7 +643,7 @@ mod test {
         evt_wr
             .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(5)))
             .unwrap();
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Pending => assert!(true),
             _ => assert!(false),
         }
@@ -659,7 +655,7 @@ mod test {
         evt_wr
             .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(3)))
             .unwrap();
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Pending => assert!(true),
             _ => assert!(false),
         }
@@ -671,7 +667,7 @@ mod test {
         evt_wr
             .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(0)))
             .unwrap();
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Ready(Ok(())) => assert!(true),
             _ => assert!(false),
         }
@@ -682,7 +678,7 @@ mod test {
         // mark write shutdown... but we haven't received a
         // disconnect confirmation yet, so we're still open
         arq.shutdown_write();
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Ready(Ok(_o)) => assert!(true),
             _ => assert!(false),
         }
@@ -694,16 +690,76 @@ mod test {
             .unwrap();
 
         // We're still flushed
-        match arq.poll_flush(&mut data_sink, &mut evt_rd, &mut waker) {
+        match arq.poll_flush(&mut data_sinkstream, &mut waker) {
             Poll::Ready(Ok(_o)) => assert!(true),
             _ => assert!(false),
         }
 
         // No more bytes are accepted
-        let res = arq.poll_write(&mut data_sink, &mut evt_rd, &mut waker, b"HELLO");
+        let res = arq.poll_write(&mut data_sinkstream, &mut waker, b"HELLO");
         match res {
             Poll::Ready(Err(_e)) => assert!(true),
             _ => assert!(false),
+        }
+    }
+
+    // a stream with an attached sink that simply drains
+    struct StreamDrain<S>
+    where
+        S: Stream<Item = DataEvent> + Unpin,
+    {
+        stream: S,
+    }
+
+    impl<S> StreamDrain<S>
+    where
+        S: Stream<Item = DataEvent> + Unpin,
+    {
+        fn new(stream: S) -> Self {
+            StreamDrain { stream }
+        }
+    }
+
+    impl<S> Stream for StreamDrain<S>
+    where
+        S: Stream<Item = DataEvent> + Unpin,
+    {
+        type Item = DataEvent;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Pin::new(&mut (*self).stream).poll_next(cx)
+        }
+    }
+
+    impl<S> Sink<DataOut> for StreamDrain<S>
+    where
+        S: Stream<Item = DataEvent> + Unpin,
+    {
+        type SinkError = io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::SinkError>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: Pin<&mut Self>, _item: DataOut) -> Result<(), Self::SinkError> {
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::SinkError>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::SinkError>> {
+            Poll::Ready(Ok(()))
         }
     }
 }

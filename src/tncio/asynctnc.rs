@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::channel::mpsc;
+use futures::executor::ThreadPool;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::lock::Mutex;
 use futures::sink::{Sink, SinkExt};
@@ -78,6 +79,9 @@ where
     event_timeout: Duration,
     disconnect_progress: DisconnectProgress,
 }
+
+/// Type specialization for public API
+pub type AsyncTncTcp = AsyncTnc<TcpStream, ThreadPool>;
 
 impl<I: 'static, P> AsyncTnc<I, P>
 where
@@ -300,6 +304,23 @@ where
     /// # Return
     /// Sink reference
     pub fn data_sink(&mut self) -> &mut (impl Sink<DataOut, SinkError = io::Error> + Unpin) {
+        &mut self.data_stream
+    }
+
+    /// Events and data stream, for both incoming and outgoing data
+    ///
+    /// The stream emits both connection-relevant events and
+    /// data received from remote peers.
+    ///
+    /// The sink accepts data for transmission over the air.
+    /// Each FEC transmission must be sent in one call. ARQ
+    /// data may be sent in a streaming manner.
+    ///
+    /// # Return
+    /// Stream + Sink reference
+    pub fn data_stream_sink(
+        &mut self,
+    ) -> &mut (impl Stream<Item = DataEvent> + Sink<DataOut, SinkError = io::Error> + Unpin) {
         &mut self.data_stream
     }
 
