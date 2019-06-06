@@ -11,7 +11,6 @@
 //! 1. If the parser matched anything contains `Some` `Response`,
 //!    which is further enumerated.
 
-use std::fmt;
 use std::str;
 use std::string::String;
 
@@ -21,6 +20,7 @@ use nom::*;
 
 use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
 use crate::connectioninfo::ConnectionInfo;
+use crate::tncerror::ConnectionFailedReason;
 
 custom_derive! {
     /// ARQ Connection States
@@ -63,31 +63,6 @@ impl State {
             &State::IRS => true,
             &State::IRStoISS => true,
             _ => false,
-        }
-    }
-}
-
-/// Reasons a remote peer will reject a connection
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ConnectionFailedReason {
-    /// Peer is busy with an existing connection, or channel busy?
-    Busy,
-
-    /// Bandwidth negotiation failed
-    IncompatibleBandwidth,
-
-    /// No answer from peer
-    NoAnswer,
-}
-
-impl fmt::Display for ConnectionFailedReason {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self {
-            ConnectionFailedReason::Busy => write!(f, "busy channel"),
-            ConnectionFailedReason::IncompatibleBandwidth => {
-                write!(f, "rejected by peer: incompatible bandwidth")
-            }
-            ConnectionFailedReason::NoAnswer => write!(f, "no answer from peer"),
         }
     }
 }

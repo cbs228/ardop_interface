@@ -194,7 +194,7 @@ mod test {
 
     use crate::framer::Framed;
     use crate::framing::data::TncDataFraming;
-    use crate::protocol::response::ConnectionFailedReason;
+    use crate::tncerror::ConnectionFailedReason;
 
     #[test]
     fn test_stream() {

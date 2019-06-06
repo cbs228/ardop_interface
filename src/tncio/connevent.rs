@@ -9,7 +9,8 @@ use std::convert::Into;
 use std::string::String;
 
 use crate::connectioninfo::{ConnectionInfo, Direction};
-use crate::protocol::response::{ConnectionFailedReason, ConnectionStateChange, Event, State};
+use crate::protocol::response::{ConnectionStateChange, Event, State};
+use crate::tncerror::ConnectionFailedReason;
 
 /// Handles TNC events
 pub struct ConnEventParser {

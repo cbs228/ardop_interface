@@ -12,8 +12,7 @@ use futures::executor::ThreadPool;
 use crate::arqstream::ArqStream;
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::protocol::response::ConnectionFailedReason;
-use crate::tncerror::TncResult;
+use crate::tncerror::{ConnectionFailedReason, TncResult};
 use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
 
 /// Default minimum clear time for new outgoing connections

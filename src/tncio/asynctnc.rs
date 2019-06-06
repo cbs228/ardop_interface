@@ -39,11 +39,9 @@ use crate::framing::data::TncDataFraming;
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
-use crate::protocol::response::{
-    CommandOk, CommandResult, ConnectionFailedReason, ConnectionStateChange, Event,
-};
+use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange, Event};
 use crate::tncdata::DataOut;
-use crate::tncerror::{TncError, TncResult};
+use crate::tncerror::{ConnectionFailedReason, TncError, TncResult};
 
 /// Error string indicating a mutex deadlock
 pub const MUTEX_LOCK_ERR: &'static str = "Unable to lock the ARDOP TNC";
