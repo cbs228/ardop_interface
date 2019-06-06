@@ -326,6 +326,7 @@ named!(
             parse_fault |
             parse_newstate |
             parse_pending |
+            parse_ping |
             parse_pingack |
             parse_pingreply |
             parse_ptt |
