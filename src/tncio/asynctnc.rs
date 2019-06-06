@@ -33,7 +33,7 @@ use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamResults};
 use super::dataevent::{DataEvent, DataEventStream};
 
-use crate::connectioninfo::ConnectionInfo;
+use crate::arq::ConnectionInfo;
 use crate::framer::Framed;
 use crate::framing::data::TncDataFraming;
 use crate::protocol::command;

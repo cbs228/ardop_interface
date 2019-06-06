@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::executor::ThreadPool;
 
-use crate::arqstream::ArqStream;
+use crate::arq::ArqStream;
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::tncerror::{ConnectionFailedReason, TncResult};

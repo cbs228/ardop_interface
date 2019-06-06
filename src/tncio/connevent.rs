@@ -8,7 +8,7 @@
 use std::convert::Into;
 use std::string::String;
 
-use crate::connectioninfo::{ConnectionInfo, Direction};
+use crate::arq::{ConnectionInfo, Direction};
 use crate::protocol::response::{ConnectionStateChange, Event, State};
 use crate::tncerror::ConnectionFailedReason;
 

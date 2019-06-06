@@ -14,7 +14,7 @@ use futures::executor;
 use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use futures::task::{Context, Poll};
 
-use crate::connectioninfo::ConnectionInfo;
+use super::connectioninfo::ConnectionInfo;
 use crate::tncio::arqstate::ArqState;
 use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
 

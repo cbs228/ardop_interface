@@ -16,7 +16,7 @@ use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
-use crate::connectioninfo::ConnectionInfo;
+use crate::arq::ConnectionInfo;
 use crate::protocol::response::ConnectionStateChange;
 use crate::tncdata::{DataIn, DataOut};
 use crate::tncio::dataevent::DataEvent;
@@ -542,7 +542,7 @@ mod test {
     use futures::stream::Stream;
     use futures::task;
 
-    use crate::connectioninfo::Direction;
+    use crate::arq::Direction;
 
     #[test]
     fn test_read_from_buffers() {

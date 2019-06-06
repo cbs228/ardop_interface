@@ -19,7 +19,7 @@ use nom::types::CompleteStr;
 use nom::*;
 
 use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
-use crate::connectioninfo::ConnectionInfo;
+use crate::arq::ConnectionInfo;
 use crate::tncerror::ConnectionFailedReason;
 
 custom_derive! {

@@ -17,8 +17,7 @@ extern crate async_timer;
 extern crate num;
 extern crate romio;
 
-pub mod arqstream;
-pub mod connectioninfo;
+pub mod arq;
 pub mod framer;
 pub mod tnc;
 pub mod tncdata;
