@@ -38,6 +38,18 @@ impl ArqStream {
         self.state.is_open()
     }
 
+    /// True if the connection is disconnecting
+    ///
+    /// This method returns `true` if the local side has
+    /// initiated a disconnect but the disconnect has yet
+    /// to complete.
+    ///
+    /// While the disconnect is "in flight," `is_open()`
+    /// will continue to return true.
+    pub fn is_disconnecting(&self) -> bool {
+        self.state.is_disconnecting()
+    }
+
     /// Return connection information
     ///
     /// Includes immutable details about the connection, such
@@ -157,6 +169,13 @@ impl AsyncWrite for ArqStream {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
+        if !this.is_open() {
+            return Poll::Ready(Ok(()));
+        }
+        if !this.is_disconnecting() {
+            this.state.shutdown_write();
+        }
+
         let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
         match ready!(tnc.poll_disconnect(cx)) {
             Ok(k) => {

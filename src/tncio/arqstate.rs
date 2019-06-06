@@ -83,6 +83,18 @@ impl ArqState {
         self.final_elapsed_time.is_none()
     }
 
+    /// True if the connection is disconnecting
+    ///
+    /// This method returns `true` if the local side has
+    /// initiated a disconnect but the disconnect has yet
+    /// to complete.
+    ///
+    /// While the disconnect is "in flight," `is_open()`
+    /// will continue to return true.
+    pub fn is_disconnecting(&self) -> bool {
+        self.closed_write && ! self.closed_read
+    }
+
     /// Return connection information
     ///
     /// Includes immutable details about the connection, such
