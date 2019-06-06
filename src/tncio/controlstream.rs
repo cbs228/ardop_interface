@@ -16,8 +16,8 @@ use futures::prelude::*;
 use futures::task::Context;
 use futures::task::Poll;
 
+use crate::framer::Framed;
 use crate::framing::control::TncControlFraming;
-use crate::framing::framer::Framed;
 use crate::protocol::response::{CommandResult, Event, Response};
 
 /// Bind input streams to a TNC control socket
