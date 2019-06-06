@@ -5,7 +5,7 @@ use std::io;
 
 use bytes::{BufMut, BytesMut};
 
-use super::framer::{Decoder, Encoder};
+use crate::framer::{Decoder, Encoder};
 
 use crate::tncdata::{DataIn, DataOut};
 
@@ -64,7 +64,7 @@ mod test {
     use futures::executor::ThreadPool;
     use futures::prelude::*;
 
-    use super::super::framer::Framed;
+    use crate::framer::Framed;
 
     #[test]
     fn test_encode() {

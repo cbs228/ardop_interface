@@ -34,8 +34,8 @@ use super::controlstream::{ControlSink, ControlStreamResults};
 use super::dataevent::{DataEvent, DataEventStream};
 
 use crate::connectioninfo::ConnectionInfo;
+use crate::framer::Framed;
 use crate::framing::data::TncDataFraming;
-use crate::framing::framer::Framed;
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
