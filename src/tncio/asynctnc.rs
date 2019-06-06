@@ -699,10 +699,7 @@ where
                 Ok((in_id, msg))
             } else {
                 // success, but this isn't the command we are looking for
-                Err(TncError::CommandResponseInvalid(
-                    cmd.command_id().clone(),
-                    in_id,
-                ))
+                Err(TncError::CommandResponseInvalid)
             }
         }
     }
@@ -849,9 +846,7 @@ mod test {
             cmd_out,
         ));
         match res {
-            Err(TncError::CommandResponseInvalid(CommandID::LISTEN, CommandID::VERSION)) => {
-                assert!(true)
-            }
+            Err(TncError::CommandResponseInvalid) => assert!(true),
             _ => assert!(false),
         }
     }
