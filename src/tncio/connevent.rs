@@ -54,15 +54,6 @@ impl ConnEventParser {
         self.buffer = 0;
     }
 
-    /// True if an ARQ connection is connected
-    ///
-    /// # Returns
-    /// `true` if an ongoing ARQ connection existed after the
-    /// last call to `ConnEventParser::process()`.
-    pub fn is_connected(&self) -> bool {
-        self.is_connected
-    }
-
     /// Get this station's callsign
     ///
     /// # Returns
@@ -165,7 +156,6 @@ mod test {
             }
             _ => assert!(false),
         };
-        assert!(evh.is_connected());
     }
 
     #[test]
@@ -183,7 +173,6 @@ mod test {
             }
             _ => assert!(false),
         };
-        assert!(evh.is_connected());
     }
 
     #[test]
@@ -195,7 +184,6 @@ mod test {
             Some(ConnectionStateChange::Closed) => assert!(true),
             _ => assert!(false),
         }
-        assert_eq!(false, evh.is_connected());
 
         evh.process(Event::NEWSTATE(State::ISS));
         let e2 = evh.process(Event::NEWSTATE(State::DISC));
@@ -203,7 +191,6 @@ mod test {
             Some(ConnectionStateChange::Failed(ConnectionFailedReason::NoAnswer)) => assert!(true),
             _ => assert!(false),
         }
-        assert_eq!(false, evh.is_connected());
     }
 
     #[test]

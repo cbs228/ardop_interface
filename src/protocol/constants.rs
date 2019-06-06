@@ -1,6 +1,3 @@
-/// Line delimiter in ARDOP control messages
-pub const NEWLINE: u8 = b'\r';
-
 /// Line delimiter in ARDOP control messages (str)
 pub const NEWLINE_STR: &'static str = "\r";
 

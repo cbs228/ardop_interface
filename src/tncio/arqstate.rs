@@ -92,7 +92,7 @@ impl ArqState {
     /// While the disconnect is "in flight," `is_open()`
     /// will continue to return true.
     pub fn is_disconnecting(&self) -> bool {
-        self.closed_write && ! self.closed_read
+        self.closed_write && !self.closed_read
     }
 
     /// Return connection information

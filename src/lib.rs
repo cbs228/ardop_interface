@@ -20,12 +20,13 @@ extern crate romio;
 pub mod arqstream;
 pub mod connectioninfo;
 pub mod framer;
-pub mod framing;
-pub mod protocol;
 pub mod tnc;
 pub mod tncdata;
 pub mod tncerror;
-pub mod tncio;
+
+mod framing;
+mod protocol;
+mod tncio;
 
 #[cfg(test)]
 mod tests {
