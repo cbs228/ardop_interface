@@ -1,10 +1,12 @@
 //! A future futures framer
 //!
-//! The `FramedWrite` translates messages into an non-delimited
-//! stream of bytes. The `FramedRead` does the inverse:
-//! transforming a non-delimited stream of bytes into messages.
-//! Both include an internal buffer of work.
+//! The `Framed` wraps an Async I/O type and provides an
+//! adapter kit which converts a stream or sink of
+//! *messages* into raw *bytes*. The caller must provide
+//! a codec which implements `Encoder` and `Decoder`.
 //!
+//! See `crate::framing::data::TncDataFraming` for an
+//! example codec.
 
 use std::io;
 use std::marker::Unpin;
@@ -18,6 +20,7 @@ use futures::{Sink, Stream};
 use bytes::BytesMut;
 
 const READ_SIZE: usize = 8192;
+const DEFAULT_SEND_HIGH_WATER_MARK: usize = 65535;
 
 /// Converts messages to byte streams
 pub trait Encoder {
@@ -25,6 +28,11 @@ pub trait Encoder {
     type EncodeItem;
 
     /// Frame `item`
+    ///
+    /// Implementations must write a serialized, framed representation
+    /// of `item` to the given `dst` buffer. The encoder *may* enlarge
+    /// the buffer to make room for `item`, but in general they are
+    /// encouraged to avoid allocations.
     ///
     /// # Parameters
     /// - `item`: The item to frame
@@ -43,15 +51,21 @@ pub trait Decoder {
     /// De-frame `item`
     ///
     /// This method must read `src`, de-frame zero or one items,
-    /// and remove the framed bytes from `src`.
+    /// and remove the framed bytes from `src`. The de-framed
+    /// item must be returned.
+    ///
+    /// If the codec encounters a bad message from which it
+    /// cannot recover, then this method should return an error.
+    /// Errors will result in the framer's stream returning
+    /// "EOF."
     ///
     /// # Parameters
     /// - `src`: Source byte stream
     ///
     /// # Returns
     /// `Ok(None)` if zero messages can be framed from `src`,
-    /// an error if the framer fails to parse an item, or an
-    /// `Ok(Some(DecodeItem))` if a message can be de-framed.
+    /// an error if the framer encounters a non-recoverable error,
+    /// or an `Ok(Some(DecodeItem))` if a message can be de-framed.
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::DecodeItem>>;
 }
 
@@ -65,6 +79,7 @@ where
     io: I,
     inbuf: BytesMut,
     outbuf: BytesMut,
+    send_high_water_mark: usize,
 }
 
 impl<I, C> Framed<I, C>
@@ -87,7 +102,39 @@ where
             io,
             inbuf: BytesMut::with_capacity(READ_SIZE),
             outbuf: BytesMut::with_capacity(READ_SIZE),
+            send_high_water_mark: DEFAULT_SEND_HIGH_WATER_MARK,
         }
+    }
+
+    /// Gets the high-water mark
+    ///
+    /// When the outgoing buffer reaches the high-water mark,
+    /// the `Framer` will stop accepting new outgoing messages
+    /// for transmission. The sink will return `Pending` until
+    /// the buffer drops below the high-water mark.
+    ///
+    /// The high water-mark does not impose a hard upper bound
+    /// on the length of either buffer, but it does impose a
+    /// soft upper bound.
+    pub fn send_high_water_mark(&self) -> usize {
+        self.send_high_water_mark
+    }
+
+    /// Gets the high-water mark
+    ///
+    /// When the outgoing buffer reaches the high-water mark,
+    /// the `Framer` will stop accepting new outgoing messages
+    /// for transmission. The sink will return `Pending` until
+    /// the buffer drops below the high-water mark.
+    ///
+    /// The high-water mark does not impose a hard upper bound
+    /// on the length of either buffer, but it does impose a
+    /// soft upper bound.
+    ///
+    /// # Parameters
+    /// - `hwm`: New send high-water mark
+    pub fn set_send_high_water_mark(&mut self, hwm: usize) {
+        self.send_high_water_mark = hwm;
     }
 
     /// Release the I/O and the codec
@@ -106,10 +153,12 @@ where
     type SinkError = io::Error;
 
     fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::SinkError>> {
-        // we are always ready to receive
+        while self.outbuf.len() > self.send_high_water_mark {
+            ready!(Pin::new(&mut *self).poll_flush(cx))?;
+        }
         Poll::Ready(Ok(()))
     }
 
@@ -155,18 +204,18 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-
-        // try to frame from the buffer
         let mut buf = &mut this.inbuf;
-        if !buf.is_empty() {
-            match this.codec.decode(&mut buf) {
-                Ok(Some(itm)) => return Poll::Ready(Some(itm)),
-                Err(_e) => return Poll::Ready(None),
-                Ok(None) => { /* continue */ }
-            }
-        }
 
         loop {
+            // try to frame from the buffer
+            if !buf.is_empty() {
+                match this.codec.decode(&mut buf) {
+                    Ok(Some(itm)) => return Poll::Ready(Some(itm)),
+                    Err(_e) => return Poll::Ready(None),
+                    Ok(None) => { /* continue */ }
+                }
+            }
+
             // enlarge the buffer by READ_SIZE, and read that much
             let old_len = buf.len();
             buf.resize(old_len + READ_SIZE, 0u8);
@@ -183,13 +232,6 @@ where
                     buf.resize(old_len, 0u8);
                     return Poll::Ready(None);
                 }
-            }
-
-            // try to frame
-            match this.codec.decode(&mut buf) {
-                Ok(Some(itm)) => return Poll::Ready(Some(itm)),
-                Err(_e) => return Poll::Ready(None),
-                Ok(None) => continue,
             }
         }
     }
