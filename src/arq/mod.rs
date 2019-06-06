@@ -7,4 +7,4 @@ pub mod arqstream;
 pub mod connectioninfo;
 
 pub use arqstream::ArqStream;
-pub use connectioninfo::{ConnectionInfo, Direction};
+pub use connectioninfo::{ConnectionInfo, CallDirection};

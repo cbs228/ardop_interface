@@ -542,7 +542,7 @@ mod test {
     use futures::stream::Stream;
     use futures::task;
 
-    use crate::arq::Direction;
+    use crate::arq::CallDirection;
 
     #[test]
     fn test_read_from_buffers() {
@@ -576,7 +576,7 @@ mod test {
             "W1AW",
             Some("EM00".to_owned()),
             500,
-            Direction::Outgoing("W9ABC".to_owned()),
+            CallDirection::Outgoing("W9ABC".to_owned()),
         );
         let mut arq = ArqState::new(nfo);
 
@@ -622,7 +622,7 @@ mod test {
             "W1AW",
             Some("EM00".to_owned()),
             500,
-            Direction::Outgoing("W9ABC".to_owned()),
+            CallDirection::Outgoing("W9ABC".to_owned()),
         );
         let mut arq = ArqState::new(nfo);
         let mut waker = Context::from_waker(task::noop_waker_ref());
