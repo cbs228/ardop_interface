@@ -38,6 +38,11 @@ impl Decoder for TncControlFraming {
         // drop parsed characters from the buffer
         let _ = src.advance(res.0);
 
+        match &res.1 {
+            Some(ref resp) => trace!(target:"control", "Control received: {:?}", resp),
+            _ => (),
+        }
+
         Ok(res.1)
     }
 }

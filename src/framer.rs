@@ -219,8 +219,12 @@ where
             // enlarge the buffer by READ_SIZE, and read that much
             let old_len = buf.len();
             buf.resize(old_len + READ_SIZE, 0u8);
-            match ready!(Pin::new(&mut this.io).poll_read(cx, &mut buf.as_mut()[old_len..])) {
-                Ok(nread) => {
+            match Pin::new(&mut this.io).poll_read(cx, &mut buf.as_mut()[old_len..]) {
+                Poll::Pending => {
+                    buf.resize(old_len, 0u8);
+                    return Poll::Pending;
+                }
+                Poll::Ready(Ok(nread)) => {
                     // shrink the buffer back down
                     buf.resize(old_len + nread, 0u8);
                     if nread <= 0 {
@@ -228,7 +232,7 @@ where
                         return Poll::Ready(None);
                     }
                 }
-                Err(_e) => {
+                Poll::Ready(Err(_e)) => {
                     buf.resize(old_len, 0u8);
                     return Poll::Ready(None);
                 }
