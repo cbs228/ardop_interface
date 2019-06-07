@@ -9,11 +9,11 @@ use std::time::Duration;
 
 use futures::executor::ThreadPool;
 
-use crate::arqstream::ArqStream;
+use super::TncResult;
+
+use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::protocol::response::ConnectionFailedReason;
-use crate::tncerror::TncResult;
 use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
 
 /// Default minimum clear time for new outgoing connections

@@ -3,6 +3,7 @@
 //! All commands are sent from the host to the TNC.
 //! Commands are accepted when they are echoed back
 //! and rejected by `FAULT` messages.
+#![allow(dead_code)]
 
 use std::convert::Into;
 use std::fmt;

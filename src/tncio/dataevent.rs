@@ -11,8 +11,9 @@ use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
 use super::connevent::ConnEventParser;
+use super::data::{DataIn, DataOut};
+
 use crate::protocol::response::{ConnectionStateChange, Event};
-use crate::tncdata::{DataIn, DataOut};
 
 /// Connection event or data
 ///
@@ -192,9 +193,9 @@ mod test {
     use futures::stream;
     use futures::stream::StreamExt;
 
+    use crate::arq::ConnectionFailedReason;
     use crate::framer::Framed;
     use crate::framing::data::TncDataFraming;
-    use crate::protocol::response::ConnectionFailedReason;
 
     #[test]
     fn test_stream() {

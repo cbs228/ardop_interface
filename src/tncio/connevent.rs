@@ -8,8 +8,8 @@
 use std::convert::Into;
 use std::string::String;
 
-use crate::connectioninfo::{ConnectionInfo, Direction};
-use crate::protocol::response::{ConnectionFailedReason, ConnectionStateChange, Event, State};
+use crate::arq::{CallDirection, ConnectionFailedReason, ConnectionInfo};
+use crate::protocol::response::{ConnectionStateChange, Event, State};
 
 /// Handles TNC events
 pub struct ConnEventParser {
@@ -53,15 +53,6 @@ impl ConnEventParser {
         self.buffer = 0;
     }
 
-    /// True if an ARQ connection is connected
-    ///
-    /// # Returns
-    /// `true` if an ongoing ARQ connection existed after the
-    /// last call to `ConnEventParser::process()`.
-    pub fn is_connected(&self) -> bool {
-        self.is_connected
-    }
-
     /// Get this station's callsign
     ///
     /// # Returns
@@ -97,8 +88,8 @@ impl ConnEventParser {
             Event::CONNECTED(peer, bw, grid) => {
                 // connection established... which way?
                 let dir = match &self.last_target {
-                    None => Direction::Outgoing(self.mycall.to_owned()),
-                    Some(myalt) => Direction::Incoming(myalt.to_owned()),
+                    None => CallDirection::Outgoing(self.mycall.to_owned()),
+                    Some(myalt) => CallDirection::Incoming(myalt.to_owned()),
                 };
 
                 self.is_connected = true;
@@ -159,12 +150,14 @@ mod test {
         match e1 {
             Some(ConnectionStateChange::Connected(conn)) => {
                 assert_eq!(500, conn.bandwidth());
-                assert_eq!(&Direction::Outgoing("W0EME".to_owned()), conn.direction());
+                assert_eq!(
+                    &CallDirection::Outgoing("W0EME".to_owned()),
+                    conn.direction()
+                );
                 assert_eq!("W1AW", conn.peer_call());
             }
             _ => assert!(false),
         };
-        assert!(evh.is_connected());
     }
 
     #[test]
@@ -177,12 +170,14 @@ mod test {
         match e1 {
             Some(ConnectionStateChange::Connected(conn)) => {
                 assert_eq!(500, conn.bandwidth());
-                assert_eq!(&Direction::Incoming("W0EME-S".to_owned()), conn.direction());
+                assert_eq!(
+                    &CallDirection::Incoming("W0EME-S".to_owned()),
+                    conn.direction()
+                );
                 assert_eq!("W1AW", conn.peer_call());
             }
             _ => assert!(false),
         };
-        assert!(evh.is_connected());
     }
 
     #[test]
@@ -194,7 +189,6 @@ mod test {
             Some(ConnectionStateChange::Closed) => assert!(true),
             _ => assert!(false),
         }
-        assert_eq!(false, evh.is_connected());
 
         evh.process(Event::NEWSTATE(State::ISS));
         let e2 = evh.process(Event::NEWSTATE(State::DISC));
@@ -202,7 +196,6 @@ mod test {
             Some(ConnectionStateChange::Failed(ConnectionFailedReason::NoAnswer)) => assert!(true),
             _ => assert!(false),
         }
-        assert_eq!(false, evh.is_connected());
     }
 
     #[test]

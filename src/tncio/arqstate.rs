@@ -16,10 +16,11 @@ use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
-use crate::connectioninfo::ConnectionInfo;
+use super::data::{DataIn, DataOut};
+use super::dataevent::DataEvent;
+
+use crate::arq::ConnectionInfo;
 use crate::protocol::response::ConnectionStateChange;
-use crate::tncdata::{DataIn, DataOut};
-use crate::tncio::dataevent::DataEvent;
 
 const INITIAL_NUM_BUF: usize = 16;
 const SEND_HWM: u64 = 65535;
@@ -81,6 +82,18 @@ impl ArqState {
     /// write.
     pub fn is_open(&self) -> bool {
         self.final_elapsed_time.is_none()
+    }
+
+    /// True if the connection is disconnecting
+    ///
+    /// This method returns `true` if the local side has
+    /// initiated a disconnect but the disconnect has yet
+    /// to complete.
+    ///
+    /// While the disconnect is "in flight," `is_open()`
+    /// will continue to return true.
+    pub fn is_disconnecting(&self) -> bool {
+        self.closed_write && !self.closed_read
     }
 
     /// Return connection information
@@ -530,7 +543,7 @@ mod test {
     use futures::stream::Stream;
     use futures::task;
 
-    use crate::connectioninfo::Direction;
+    use crate::arq::CallDirection;
 
     #[test]
     fn test_read_from_buffers() {
@@ -564,7 +577,7 @@ mod test {
             "W1AW",
             Some("EM00".to_owned()),
             500,
-            Direction::Outgoing("W9ABC".to_owned()),
+            CallDirection::Outgoing("W9ABC".to_owned()),
         );
         let mut arq = ArqState::new(nfo);
 
@@ -610,7 +623,7 @@ mod test {
             "W1AW",
             Some("EM00".to_owned()),
             500,
-            Direction::Outgoing("W9ABC".to_owned()),
+            CallDirection::Outgoing("W9ABC".to_owned()),
         );
         let mut arq = ArqState::new(nfo);
         let mut waker = Context::from_waker(task::noop_waker_ref());

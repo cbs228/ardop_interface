@@ -5,4 +5,5 @@ pub mod asynctnc;
 pub mod busylock;
 pub mod connevent;
 pub mod controlstream;
+pub mod data;
 pub mod dataevent;

@@ -4,7 +4,7 @@ use std::string::String;
 
 /// Connection direction
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Direction {
+pub enum CallDirection {
     /// An outgoing connection, via `ARQCALL`
     ///
     /// Parameters:
@@ -34,7 +34,7 @@ pub struct ConnectionInfo {
     bandwidth: u16,
 
     /// Connection direction
-    direction: Direction,
+    direction: CallDirection,
 }
 
 impl ConnectionInfo {
@@ -49,7 +49,7 @@ impl ConnectionInfo {
         peer_call: S,
         peer_grid: Option<String>,
         bandwidth: u16,
-        direction: Direction,
+        direction: CallDirection,
     ) -> ConnectionInfo
     where
         S: Into<String>,
@@ -83,7 +83,7 @@ impl ConnectionInfo {
     }
 
     /// Connection direction (incoming vs outgoing)
-    pub fn direction(&self) -> &Direction {
+    pub fn direction(&self) -> &CallDirection {
         &self.direction
     }
 }
@@ -91,12 +91,12 @@ impl ConnectionInfo {
 impl fmt::Display for ConnectionInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let fm = match &self.direction {
-            Direction::Outgoing(c) => c.as_str(),
-            Direction::Incoming(_t) => self.peer_call.as_str(),
+            CallDirection::Outgoing(c) => c.as_str(),
+            CallDirection::Incoming(_t) => self.peer_call.as_str(),
         };
         let to = match &self.direction {
-            Direction::Outgoing(_c) => self.peer_call.as_str(),
-            Direction::Incoming(t) => t.as_str(),
+            CallDirection::Outgoing(_c) => self.peer_call.as_str(),
+            CallDirection::Incoming(t) => t.as_str(),
         };
         match &self.peer_grid {
             Some(grid) => write!(f, "{}>{} [{}][{} Hz]", fm, to, grid, self.bandwidth),
@@ -111,7 +111,12 @@ mod test {
 
     #[test]
     fn test_fmt() {
-        let ct = ConnectionInfo::new("W9ABC", None, 500, Direction::Outgoing("W1AW".to_string()));
+        let ct = ConnectionInfo::new(
+            "W9ABC",
+            None,
+            500,
+            CallDirection::Outgoing("W1AW".to_string()),
+        );
         let s = ct.to_string();
         assert!(s.starts_with("W1AW>W9ABC [????][500 Hz]"));
 
@@ -119,7 +124,7 @@ mod test {
             "W9ABC",
             Some("EM00".to_owned()),
             500,
-            Direction::Incoming("W1AW-S".to_owned()),
+            CallDirection::Incoming("W1AW-S".to_owned()),
         );
         let s = ct.to_string();
         assert!(s.starts_with("W9ABC>W1AW-S [EM00][500 Hz]"));
