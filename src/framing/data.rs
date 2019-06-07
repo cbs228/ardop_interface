@@ -7,7 +7,7 @@ use bytes::{BufMut, BytesMut};
 
 use crate::framer::{Decoder, Encoder};
 
-use crate::tncdata::{DataIn, DataOut};
+use crate::tncio::data::{DataIn, DataOut};
 
 /// Frames and sends TNC data messages
 pub struct TncDataFraming {}

@@ -20,7 +20,6 @@ extern crate romio;
 pub mod arq;
 pub mod framer;
 pub mod tnc;
-pub mod tncdata;
 pub mod tncerror;
 
 mod framing;

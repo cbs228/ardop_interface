@@ -16,10 +16,11 @@ use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
+use super::data::{DataIn, DataOut};
+use super::dataevent::DataEvent;
+
 use crate::arq::ConnectionInfo;
 use crate::protocol::response::ConnectionStateChange;
-use crate::tncdata::{DataIn, DataOut};
-use crate::tncio::dataevent::DataEvent;
 
 const INITIAL_NUM_BUF: usize = 16;
 const SEND_HWM: u64 = 65535;

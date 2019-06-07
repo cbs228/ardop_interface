@@ -11,8 +11,9 @@ use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
 use super::connevent::ConnEventParser;
+use super::data::{DataIn, DataOut};
+
 use crate::protocol::response::{ConnectionStateChange, Event};
-use crate::tncdata::{DataIn, DataOut};
 
 /// Connection event or data
 ///

@@ -32,6 +32,7 @@ use super::busylock;
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamResults};
 use super::dataevent::{DataEvent, DataEventStream};
+use super::data::DataOut;
 
 use crate::arq::ConnectionInfo;
 use crate::framer::Framed;
@@ -40,7 +41,6 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange, Event};
-use crate::tncdata::DataOut;
 use crate::tncerror::{ConnectionFailedReason, TncError, TncResult};
 
 /// Error string indicating a mutex deadlock
