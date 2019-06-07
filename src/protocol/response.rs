@@ -19,8 +19,8 @@ use nom::types::CompleteStr;
 use nom::*;
 
 use super::constants::{CommandID, FALSE, NEWLINE_STR, TRUE};
-use crate::arq::ConnectionInfo;
-use crate::tncerror::ConnectionFailedReason;
+
+use crate::arq::{ConnectionFailedReason, ConnectionInfo};
 
 custom_derive! {
     /// ARQ Connection States

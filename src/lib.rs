@@ -1,3 +1,5 @@
+//! An Async Rust interface to the ARDOP TNC
+
 #![feature(async_await)]
 #![recursion_limit = "128"]
 #[allow(unused_imports)]
@@ -20,16 +22,7 @@ extern crate romio;
 pub mod arq;
 pub mod framer;
 pub mod tnc;
-pub mod tncerror;
 
 mod framing;
 mod protocol;
 mod tncio;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}

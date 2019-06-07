@@ -31,17 +31,17 @@ use romio::TcpStream;
 use super::busylock;
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamResults};
-use super::dataevent::{DataEvent, DataEventStream};
 use super::data::DataOut;
+use super::dataevent::{DataEvent, DataEventStream};
 
-use crate::arq::ConnectionInfo;
+use crate::arq::{ConnectionFailedReason, ConnectionInfo};
 use crate::framer::Framed;
 use crate::framing::data::TncDataFraming;
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange, Event};
-use crate::tncerror::{ConnectionFailedReason, TncError, TncResult};
+use crate::tnc::{TncError, TncResult};
 
 /// Error string indicating a mutex deadlock
 pub const MUTEX_LOCK_ERR: &'static str = "Unable to lock the ARDOP TNC";
@@ -677,7 +677,7 @@ where
     K: Sink<String, SinkError = Z> + Unpin,
     S: Stream<Item = CommandResult> + Unpin,
     E: Stream<Item = DataEvent> + Unpin,
-    crate::tncerror::TncError: std::convert::From<Z>,
+    crate::tnc::TncError: std::convert::From<Z>,
 {
     loop {
         match state {

@@ -111,7 +111,12 @@ mod test {
 
     #[test]
     fn test_fmt() {
-        let ct = ConnectionInfo::new("W9ABC", None, 500, CallDirection::Outgoing("W1AW".to_string()));
+        let ct = ConnectionInfo::new(
+            "W9ABC",
+            None,
+            500,
+            CallDirection::Outgoing("W1AW".to_string()),
+        );
         let s = ct.to_string();
         assert!(s.starts_with("W1AW>W9ABC [????][500 Hz]"));
 

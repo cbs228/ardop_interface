@@ -193,9 +193,9 @@ mod test {
     use futures::stream;
     use futures::stream::StreamExt;
 
+    use crate::arq::ConnectionFailedReason;
     use crate::framer::Framed;
     use crate::framing::data::TncDataFraming;
-    use crate::tncerror::ConnectionFailedReason;
 
     #[test]
     fn test_stream() {

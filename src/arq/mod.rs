@@ -3,8 +3,10 @@
 //! This module contains `ArqStream`, which is similar to
 //! the asynchronous `TcpStream`... but for radio.
 
-pub mod arqstream;
-pub mod connectioninfo;
+mod arqstream;
+mod connectioninfo;
+mod error;
 
 pub use arqstream::ArqStream;
-pub use connectioninfo::{ConnectionInfo, CallDirection};
+pub use connectioninfo::{CallDirection, ConnectionInfo};
+pub use error::ConnectionFailedReason;
