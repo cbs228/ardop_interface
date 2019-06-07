@@ -41,7 +41,7 @@ custom_derive! {
         /// Attempting to become the ISS
         IRStoISS,
 
-        /// Not connected or trying to connect, but maybe listening
+        /// ARQ connected; link is idle
         IDLE,
 
         /// Sending FEC data
@@ -62,6 +62,7 @@ impl State {
             &State::ISS => true,
             &State::IRS => true,
             &State::IRStoISS => true,
+            &State::IDLE => true,
             _ => false,
         }
     }
