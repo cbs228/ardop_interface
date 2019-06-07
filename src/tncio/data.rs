@@ -68,6 +68,7 @@ impl DataIn {
 named!(
     parse_data<&[u8], (&str, &[u8])>,
     do_parse!(
+        dlen: be_u16 >>
         dtype: map_res!(
             alt!(
                 tag!(b"FEC") |
@@ -76,8 +77,7 @@ named!(
             ),
             std::str::from_utf8
         ) >>
-        dlen: be_u16 >>
-        data: take!(dlen) >>
+        data: take!(dlen - 3) >>
         ((dtype, data))
     )
 );
@@ -88,27 +88,27 @@ mod test {
 
     #[test]
     fn test_parse() {
-        let data = b"ARQ\x00\x05HELLO";
+        let data = b"\x00\x08ARQHELLO";
         let res = DataIn::parse(data);
         assert_eq!(data.len(), res.0);
         assert_eq!(DataIn::ARQ(Bytes::from("HELLO")), res.1.unwrap());
 
         // err fields are eaten
-        let data = b"ERR\x00\x05HELLO";
+        let data = b"\x00\x08ERRHELLO";
         let res = DataIn::parse(data);
         assert_eq!(data.len(), res.0);
         assert!(res.1.is_none());
 
         // not enough bytes
-        let data = b"ARQ\x00\x05HELL";
+        let data = b"\x00\x08ARQHELL";
         let res = DataIn::parse(data);
         assert_eq!(0, res.0);
         assert!(res.1.is_none());
 
         // trailing field
-        let data = b"ARQ\x00\x05HELLOERR";
+        let data = b"\x00\x08ARQHELLO\x00\x08";
         let res = DataIn::parse(data);
-        assert_eq!(data.len() - 3, res.0);
+        assert_eq!(data.len() - 2, res.0);
         assert_eq!(DataIn::ARQ(Bytes::from("HELLO")), res.1.unwrap());
     }
 }

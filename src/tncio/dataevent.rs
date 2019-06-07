@@ -203,7 +203,7 @@ mod test {
             ConnectionFailedReason::IncompatibleBandwidth,
         )]);
 
-        let io_data = Cursor::new(b"ARQ\x00\x05HELLO".to_vec());
+        let io_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
 
         let mut dstream = DataEventStream::new(
             "W1AW",

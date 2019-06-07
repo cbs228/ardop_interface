@@ -840,7 +840,7 @@ mod test {
     fn test_streams() {
         let mut pool = LocalPool::new();
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
-        let stream_data = Cursor::new(b"ARQ\x00\x05HELLO".to_vec());
+        let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(
             pool.spawner(),

@@ -96,7 +96,7 @@ mod test {
 
     #[test]
     fn test_decode() {
-        let words = b"ARQ\x00\x05HELLOFEC\x00\x05WORLDERR".to_vec();
+        let words = b"\x00\x08ARQHELLO\x00\x08FECWORLDERR".to_vec();
         let curs = Cursor::new(words);
         let mut framer = Framed::new(curs, TncDataFraming::new());
         let mut exec = ThreadPool::new().expect("Failed to create threadpool");
