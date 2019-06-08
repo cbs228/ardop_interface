@@ -423,20 +423,21 @@ impl ArqState {
                     Poll::Ready(Ok(()))
                 }
             }
-            Some(DataEvent::Data(DataIn::FEC(_data))) => {
-                /* drop FEC data on the floor */
-                Poll::Pending
-            }
             Some(DataEvent::Data(DataIn::ARQ(data))) => {
                 // append fresh data to buffer set
                 self.rx_buffers.push_back(Cursor::new(data));
                 Poll::Ready(Ok(()))
+            }
+            Some(DataEvent::Data(_data)) => {
+                /* drop other frames on the floor */
+                Poll::Pending
             }
         }
     }
 
     // processes a connection-relevant event
     fn handle_event(&mut self, event: ConnectionStateChange) {
+        trace!(target:"ARQ", "ARQ Event: {:?}", &event);
         match event {
             ConnectionStateChange::Closed => {
                 // This connection has gone away.

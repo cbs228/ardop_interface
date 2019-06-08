@@ -26,6 +26,12 @@ pub enum DataIn {
     ///
     /// FEC frames always include a complete message
     FEC(Bytes),
+
+    /// ID Frame
+    ///
+    /// ID frames are produced by the `SENDID` command and
+    /// announce a remote station's callsign and grid.
+    IDF(Bytes),
 }
 
 impl DataIn {
@@ -49,7 +55,7 @@ impl DataIn {
                 let out = match dtype {
                     "ARQ" => Some(DataIn::ARQ(Bytes::from(data))),
                     "FEC" => Some(DataIn::FEC(Bytes::from(data))),
-                    "ERR" => None,
+                    "IDF" => Some(DataIn::IDF(Bytes::from(data))),
                     _ => None,
                 };
                 (taken, out)
@@ -70,11 +76,7 @@ named!(
     do_parse!(
         dlen: be_u16 >>
         dtype: map_res!(
-            alt!(
-                tag!(b"FEC") |
-                tag!(b"ARQ") |
-                tag!(b"ERR")
-            ),
+            take!(3),
             std::str::from_utf8
         ) >>
         data: take!(dlen - 3) >>
@@ -110,5 +112,11 @@ mod test {
         let res = DataIn::parse(data);
         assert_eq!(data.len() - 2, res.0);
         assert_eq!(DataIn::ARQ(Bytes::from("HELLO")), res.1.unwrap());
+
+        // unknown frame
+        let data = b"\x00\x08ZZZHELLO";
+        let res = DataIn::parse(data);
+        assert_eq!(data.len(), res.0);
+        assert!(res.1.is_none());
     }
 }
