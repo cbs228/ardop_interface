@@ -109,15 +109,11 @@ impl ConnEventParser {
                 }
             }
             Event::NEWSTATE(st) => {
-                let was_connecting = State::is_connected(&self.last_arq_state);
+                let was_connecting = !self.is_connected && self.last_arq_state == State::ISS;
                 let is_connected = State::is_connected(&st);
                 self.last_arq_state = st;
 
-                if self.is_connected && !is_connected {
-                    // connection closed
-                    self.is_connected = false;
-                    Some(ConnectionStateChange::Closed)
-                } else if was_connecting && !is_connected {
+                if was_connecting && !is_connected {
                     // connection failed
                     Some(ConnectionStateChange::Failed(
                         ConnectionFailedReason::NoAnswer,
@@ -185,6 +181,11 @@ mod test {
         let mut evh = ConnEventParser::new("W0EME");
         evh.process(Event::CONNECTED("W1AW".to_owned(), 500, None));
         let e1 = evh.process(Event::NEWSTATE(State::DISC));
+        match e1 {
+            None => assert!(true),
+            _ => assert!(false),
+        }
+        let e1 = evh.process(Event::DISCONNECTED);
         match e1 {
             Some(ConnectionStateChange::Closed) => assert!(true),
             _ => assert!(false),
