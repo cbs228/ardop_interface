@@ -234,7 +234,7 @@ impl ArqState {
     {
         let mut total_read = 0usize;
         loop {
-            // read from the internal buffers, first
+            // try to read from the internal buffers
             total_read += read_from_buffers(&mut self.rx_buffers, &mut buf[total_read..]);
             if total_read >= buf.len() || self.closed_read {
                 // request satisfied using just the buffer,
@@ -242,14 +242,11 @@ impl ArqState {
                 break;
             }
 
-            match self.poll_next_dataevent(src, cx, true) {
-                // no more yet
+            // read from the stream of DataEvent
+            let _ = match self.poll_next_data_or_event(src, cx, true) {
                 Poll::Pending => break,
-                // lost connection to ARDOP
-                Poll::Ready(Err(x)) => return Poll::Ready(Err(x)),
-                // more
-                Poll::Ready(Ok(())) => continue,
-            }
+                Poll::Ready(res) => res,
+            }?;
         }
 
         if total_read > 0 {
@@ -380,8 +377,8 @@ impl ArqState {
                 }
             }
 
-            // Try to update the tx byte counts
-            ready!(self.poll_next_dataevent(io, cx, false))?;
+            // Try to update the tx byte counts and/or detect closed connection
+            ready!(self.poll_next_data_or_event(io, cx, false))?;
 
             if self.bytecount_tx_unacknowledged + self.bytecount_tx_staged <= 0 {
                 debug!(target:"ARQ", "All buffered data flushed to peer.");
@@ -392,47 +389,59 @@ impl ArqState {
 
     // Attempt to read the next DataEvent from the given Stream.
     //
-    // Reads data into the rxbuffers and processes events.
-    // Returns Poll::Ready if new data is available, or
-    // Poll::Pending if no data is available.
-    fn poll_next_dataevent<S>(
+    // Reads the incoming DataEvent stream until either a DataIn
+    // is available (if want_data) or an Event is available
+    // (if not want_data). Will return None if the connection
+    // is closed or Some(()) if the desired event or data has
+    // been extracted and processed.
+    fn poll_next_data_or_event<S>(
         &mut self,
         src: &mut S,
         cx: &mut Context<'_>,
-        data_only: bool,
-    ) -> Poll<io::Result<()>>
+        want_data: bool,
+    ) -> Poll<io::Result<Option<()>>>
     where
         S: Stream<Item = DataEvent> + Unpin,
     {
-        // read more from the connection
-        let next_item = ready!(Pin::new(src).poll_next(cx));
-        match next_item {
-            None => {
-                error!(target: "ARQ", "Lost connection to local ARDOP TNC");
-                self.mark_closed();
-                Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
-                    "Lost connection to ARDOP TNC",
-                )))
-            }
-            Some(DataEvent::Event(evt)) => {
-                self.handle_event(evt);
-                if data_only {
-                    Poll::Pending
-                } else {
-                    Poll::Ready(Ok(()))
+        while !self.closed_read {
+            let data_event: DataEvent = match ready!(Pin::new(&mut *src).poll_next(cx)) {
+                None => {
+                    error!(target: "ARQ", "Lost connection to local ARDOP TNC");
+                    self.mark_closed();
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "Lost connection to ARDOP TNC",
+                    )));
                 }
-            }
-            Some(DataEvent::Data(DataIn::ARQ(data))) => {
-                // append fresh data to buffer set
-                self.rx_buffers.push_back(Cursor::new(data));
-                Poll::Ready(Ok(()))
-            }
-            Some(DataEvent::Data(_data)) => {
-                /* drop other frames on the floor */
-                Poll::Pending
+                Some(de) => de,
+            };
+
+            match data_event {
+                // handle event
+                DataEvent::Event(evt) => {
+                    self.handle_event(evt);
+                    if !want_data && !self.closed_read {
+                        return Poll::Ready(Ok(Some(())));
+                    }
+                    if !want_data && self.closed_read {
+                        return Poll::Ready(Ok(None));
+                    }
+                }
+
+                // handle ARQ data
+                DataEvent::Data(DataIn::ARQ(data)) => {
+                    self.rx_buffers.push_back(Cursor::new(data));
+                    if want_data {
+                        return Poll::Ready(Ok(Some(())));
+                    }
+                }
+
+                // some unknown frame type -> discard
+                DataEvent::Data(_data) => (), // ignore
             }
         }
+
+        return Poll::Ready(Ok(None));
     }
 
     // processes a connection-relevant event
