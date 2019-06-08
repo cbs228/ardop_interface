@@ -283,17 +283,6 @@ where
         self.event_timeout = timeout;
     }
 
-    /// Incoming events and data stream
-    ///
-    /// This stream emits both connection-relevant events and
-    /// data received from remote peers.
-    ///
-    /// # Return
-    /// Stream reference
-    pub fn data_stream(&mut self) -> &mut (impl Stream<Item = DataEvent> + Unpin) {
-        &mut self.data_stream
-    }
-
     /// Events and data stream, for both incoming and outgoing data
     ///
     /// The stream emits both connection-relevant events and
@@ -851,19 +840,19 @@ mod test {
         );
 
         pool.run_until(async {
-            match tnc.data_stream().next().await {
+            match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(_d)) => assert!(true),
                 _ => assert!(false),
             }
 
-            match tnc.data_stream().next().await {
+            match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Event(ConnectionStateChange::Failed(
                     ConnectionFailedReason::IncompatibleBandwidth,
                 ))) => assert!(true),
                 _ => assert!(false),
             }
 
-            assert!(tnc.data_stream().next().await.is_none());
+            assert!(tnc.data_stream_sink().next().await.is_none());
         });
     }
 

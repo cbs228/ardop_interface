@@ -223,14 +223,14 @@ impl ArqState {
     ///
     /// This method is designed for compatibility with the
     /// `AsyncRead` trait, but it does not implement it.
-    pub fn poll_read<S>(
+    pub fn poll_read<K>(
         &mut self,
-        src: &mut S,
+        src: &mut K,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>>
     where
-        S: Stream<Item = DataEvent> + Unpin,
+        K: Sink<DataOut> + Stream<Item = DataEvent> + Unpin,
     {
         let mut total_read = 0usize;
         loop {
@@ -240,6 +240,26 @@ impl ArqState {
                 // request satisfied using just the buffer,
                 // or there is no more to read
                 break;
+            }
+
+            // ARDOP links are single duplex. We must try to send all
+            // peer data before we can wait for a reply. Reads must
+            // therefore be flushes.
+            if self.bytecount_tx_staged + self.bytecount_tx_unacknowledged > 0 {
+                match ready!(self.poll_flush(src, cx)) {
+                    // can't flush
+                    Err(e) => match e.kind() {
+                        // broken TNC
+                        io::ErrorKind::ConnectionReset => return Poll::Ready(Err(e)),
+
+                        // probably end of connection
+                        // the next iteration of the loop will deal with this
+                        _ => continue,
+                    },
+
+                    // we are flushed; go on to reading
+                    Ok(_ok) => (),
+                }
             }
 
             // read from the stream of DataEvent
@@ -597,13 +617,14 @@ mod test {
             DataEvent::Data(DataIn::ARQ(Bytes::from_static(b"WORLD!"))),
             DataEvent::Event(ConnectionStateChange::Closed),
         ];
-        let mut instream = stream::iter(de);
+        let instream = stream::iter(de);
+        let mut data_sinkstream = StreamDrain::new(instream);
 
         let mut out = [0u8; 8];
         let mut waker = Context::from_waker(task::noop_waker_ref());
 
         // read first fragment
-        match arq.poll_read(&mut instream, &mut waker, &mut out) {
+        match arq.poll_read(&mut data_sinkstream, &mut waker, &mut out) {
             Poll::Ready(Ok(8)) => assert!(true),
             _ => assert!(false),
         }
@@ -612,7 +633,7 @@ mod test {
         assert_eq!(8, arq.bytes_received());
 
         // read second fragment
-        match arq.poll_read(&mut instream, &mut waker, &mut out) {
+        match arq.poll_read(&mut data_sinkstream, &mut waker, &mut out) {
             Poll::Ready(Ok(4)) => assert!(true),
             _ => assert!(false),
         }
@@ -621,7 +642,7 @@ mod test {
         assert_eq!(12, arq.bytes_received());
 
         // additional reads are EOF
-        match arq.poll_read(&mut instream, &mut waker, &mut out) {
+        match arq.poll_read(&mut data_sinkstream, &mut waker, &mut out) {
             Poll::Ready(Ok(0)) => assert!(true),
             _ => assert!(false),
         }

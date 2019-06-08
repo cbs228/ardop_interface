@@ -141,7 +141,7 @@ impl AsyncRead for ArqStream {
         let this = self.get_mut();
 
         let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
-        let data = tnc.data_stream();
+        let data = tnc.data_stream_sink();
         this.state.poll_read(data, cx, buf)
     }
 }
