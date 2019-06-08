@@ -521,7 +521,7 @@ impl fmt::Display for ArqState {
 
         write!(
             f,
-            "{} [{}{:04}m{:02}s]: Rx:{} KiB, Tx:{} KiB",
+            "{} [{}{:04}m{:02}s]: Rx:{:.2} KiB, Tx:{:.2} KiB",
             self.info, open_mark, minutes, seconds, rx_kib, tx_kib
         )
     }
