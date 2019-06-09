@@ -50,7 +50,7 @@ const DATA_PORT_OFFSET: u16 = 1;
 const TCP_KEEPALIVE: Duration = Duration::from_secs(15);
 
 // Default timeout for local TNC commands
-const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(2000);
+const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(20000);
 
 // Default timeout for TNC event resolution, such as connect
 const DEFAULT_TIMEOUT_EVENT: Duration = Duration::from_secs(90);
@@ -649,6 +649,7 @@ where
     F: fmt::Display,
 {
     let send_raw = cmd.to_string();
+    debug!(target:"tnc", "Sending TNC command: {}", &send_raw);
 
     // send
     let _ = Timed::platform_new(outp.send(send_raw), timeout.clone()).await?;
