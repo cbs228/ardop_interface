@@ -5,18 +5,20 @@
 //! to RF connections much as one would use a TCP socket.
 
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::executor;
 use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use futures::lock::{Mutex, MutexLockFuture};
 use futures::task::{Context, Poll};
 
 use super::connectioninfo::ConnectionInfo;
 use crate::tncio::arqstate::ArqState;
-use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
+use crate::tncio::asynctnc::AsyncTncTcp;
 
 /// A TCP-like interface for ARQ RF connections
 pub struct ArqStream {
@@ -140,7 +142,9 @@ impl AsyncRead for ArqStream {
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_read(data, cx, buf)
     }
@@ -154,7 +158,9 @@ impl AsyncWrite for ArqStream {
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_write(data, cx, buf)
     }
@@ -162,7 +168,9 @@ impl AsyncWrite for ArqStream {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_flush(data, cx)
     }
@@ -176,7 +184,9 @@ impl AsyncWrite for ArqStream {
             this.state.shutdown_write();
         }
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         match ready!(tnc.poll_disconnect(cx)) {
             Ok(k) => {
                 // disconnect done

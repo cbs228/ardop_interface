@@ -43,9 +43,6 @@ use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange, Event};
 use crate::tnc::{TncError, TncResult};
 
-/// Error string indicating a mutex deadlock
-pub const MUTEX_LOCK_ERR: &'static str = "Unable to lock the ARDOP TNC";
-
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
 
