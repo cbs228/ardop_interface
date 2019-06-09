@@ -4,17 +4,18 @@ use std::convert::Into;
 use std::fmt;
 use std::net::SocketAddr;
 use std::string::String;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::executor::ThreadPool;
+use futures::lock::Mutex;
 
 use super::TncResult;
 
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
+use crate::tncio::asynctnc::AsyncTncTcp;
 
 /// Default minimum clear time for new outgoing connections
 pub const DEFAULT_MIN_CLEAR_TIME: &Duration = &Duration::from_secs(15);
@@ -170,7 +171,7 @@ impl ArdopTnc {
     where
         S: Into<String>,
     {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+        let mut tnc = self.inner.lock().await;
         match tnc
             .connect(target, bw, bw_forced, attempts, busy_timeout)
             .await?
@@ -207,7 +208,7 @@ impl ArdopTnc {
         bw: u16,
         bw_forced: bool,
     ) -> TncResult<Result<ArqStream, ConnectionFailedReason>> {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+        let mut tnc = self.inner.lock().await;
         match tnc.listen(bw, bw_forced).await? {
             Ok(nfo) => Ok(Ok(ArqStream::new(self.inner.clone(), nfo))),
             Err(e) => Ok(Err(e)),
@@ -367,7 +368,7 @@ impl ArdopTnc {
     /// Version string, or an error if the version string could
     /// not be retrieved.
     pub async fn version(&mut self) -> TncResult<String> {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+        let mut tnc = self.inner.lock().await;
         tnc.version().await
     }
 
@@ -383,12 +384,8 @@ impl ArdopTnc {
     ///
     /// # Returns
     /// Current timeout value
-    pub fn control_timeout(&self) -> Duration {
-        self.inner
-            .lock()
-            .expect(MUTEX_LOCK_ERR)
-            .control_timeout()
-            .clone()
+    pub async fn control_timeout(&self) -> Duration {
+        self.inner.lock().await.control_timeout().clone()
     }
 
     /// Sets timeout for the control connection
@@ -399,8 +396,8 @@ impl ArdopTnc {
     ///
     /// # Parameters
     /// - `timeout`: New command timeout value
-    pub fn set_control_timeout(&mut self, timeout: Duration) {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+    pub async fn set_control_timeout(&mut self, timeout: Duration) {
+        let mut tnc = self.inner.lock().await;
         tnc.set_control_timeout(timeout)
     }
 
@@ -416,12 +413,8 @@ impl ArdopTnc {
     ///
     /// # Returns
     /// Current timeout value
-    pub fn event_timeout(&self) -> Duration {
-        self.inner
-            .lock()
-            .expect(MUTEX_LOCK_ERR)
-            .event_timeout()
-            .clone()
+    pub async fn event_timeout(&self) -> Duration {
+        self.inner.lock().await.event_timeout().clone()
     }
 
     /// Sets timeout for the control connection
@@ -432,8 +425,8 @@ impl ArdopTnc {
     ///
     /// # Parameters
     /// - `timeout`: New event timeout value
-    pub fn set_event_timeout(&mut self, timeout: Duration) {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+    pub async fn set_event_timeout(&mut self, timeout: Duration) {
+        let mut tnc = self.inner.lock().await;
         tnc.set_event_timeout(timeout)
     }
 
@@ -453,7 +446,7 @@ impl ArdopTnc {
     where
         F: fmt::Display,
     {
-        let mut tnc = self.inner.lock().expect(MUTEX_LOCK_ERR);
+        let mut tnc = self.inner.lock().await;
         tnc.command(cmd).await
     }
 }

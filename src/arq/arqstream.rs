@@ -5,18 +5,21 @@
 //! to RF connections much as one would use a TCP socket.
 
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use futures::executor;
-use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use futures::io::{AsyncRead, AsyncWrite};
+use futures::lock::{Mutex, MutexLockFuture};
 use futures::task::{Context, Poll};
 
 use super::connectioninfo::ConnectionInfo;
 use crate::tncio::arqstate::ArqState;
-use crate::tncio::asynctnc::{AsyncTncTcp, MUTEX_LOCK_ERR};
+use crate::tncio::asynctnc::AsyncTncTcp;
 
 /// A TCP-like interface for ARQ RF connections
 pub struct ArqStream {
@@ -140,7 +143,9 @@ impl AsyncRead for ArqStream {
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_read(data, cx, buf)
     }
@@ -154,7 +159,9 @@ impl AsyncWrite for ArqStream {
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_write(data, cx, buf)
     }
@@ -162,7 +169,9 @@ impl AsyncWrite for ArqStream {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         let data = tnc.data_stream_sink();
         this.state.poll_flush(data, cx)
     }
@@ -176,7 +185,9 @@ impl AsyncWrite for ArqStream {
             this.state.shutdown_write();
         }
 
-        let mut tnc = this.tnc.lock().expect(MUTEX_LOCK_ERR);
+        let mut lock_future: MutexLockFuture<AsyncTncTcp> = this.tnc.lock();
+        let mut tnc = ready!(Pin::new(&mut lock_future).poll(cx));
+
         match ready!(tnc.poll_disconnect(cx)) {
             Ok(k) => {
                 // disconnect done
@@ -200,10 +211,22 @@ impl Drop for ArqStream {
             return;
         }
 
-        // block until we have closed
-        executor::block_on(async {
-            let _ = self.close().await;
+        // We can't use the default LocalPool when our
+        // thread is running within an async { … } context...
+        // which, for this application, is all the time.
+        //
+        // It is maybe anti-futures to spawn a thread just for
+        // this, but I see no better way at present. Patches
+        // are welcome here.
+        let tncref = self.tnc.clone();
+        thread::spawn(move || {
+            executor::block_on(async move {
+                let mut tnc = tncref.lock().await;
+                let _ = tnc.disconnect().await;
+            })
         })
+        .join()
+        .expect("Unable to join disconnect thread");
     }
 }
 
