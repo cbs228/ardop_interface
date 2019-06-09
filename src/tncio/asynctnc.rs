@@ -55,6 +55,9 @@ const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(2000);
 // Default timeout for TNC event resolution, such as connect
 const DEFAULT_TIMEOUT_EVENT: Duration = Duration::from_secs(90);
 
+// Timeout for async disconnect
+const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
+
 /// Asynchronous ARDOP TNC
 ///
 /// This object communicates with the ARDOP program
@@ -494,6 +497,38 @@ where
         // timed out
         self.command(command::listen(false)).await?;
         Ok(Err(ConnectionFailedReason::NoAnswer))
+    }
+
+    /// Disconnect any in-progress ARQ connection
+    ///
+    /// When this future has returned, the ARDOP TNC has
+    /// disconnected from any in-progress ARQ session.
+    /// This method is safe to call even when no
+    /// connection is in progress. Any errors which
+    /// result from the disconnection process are ignored.
+    pub async fn disconnect(&mut self) {
+        match self.command(command::disconnect()).await {
+            Ok(()) => { /* no-op */ }
+            Err(_e) => return,
+        };
+
+        for _i in 0..2 {
+            match self
+                .next_state_change_timeout(TIMEOUT_DISCONNECT.clone())
+                .await
+            {
+                Err(_timeout) => {
+                    // disconnect timeout; try to abort
+                    warn!(target:"tnc", "Disconnect timed out. Trying to abort.");
+                    let _ = self.command(command::abort()).await;
+                    continue;
+                }
+                Ok(ConnectionStateChange::Closed) => {
+                    break;
+                }
+                _ => { /* no-op */ }
+            }
+        }
     }
 
     /// Perform disconnect by polling

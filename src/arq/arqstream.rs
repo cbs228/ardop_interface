@@ -9,10 +9,11 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use futures::executor;
-use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use futures::io::{AsyncRead, AsyncWrite};
 use futures::lock::{Mutex, MutexLockFuture};
 use futures::task::{Context, Poll};
 
@@ -210,10 +211,22 @@ impl Drop for ArqStream {
             return;
         }
 
-        // block until we have closed
-        executor::block_on(async {
-            let _ = self.close().await;
+        // We can't use the default LocalPool when our
+        // thread is running within an async { … } context...
+        // which, for this application, is all the time.
+        //
+        // It is maybe anti-futures to spawn a thread just for
+        // this, but I see no better way at present. Patches
+        // are welcome here.
+        let tncref = self.tnc.clone();
+        thread::spawn(move || {
+            executor::block_on(async move {
+                let mut tnc = tncref.lock().await;
+                let _ = tnc.disconnect().await;
+            })
         })
+        .join()
+        .expect("Unable to join disconnect thread");
     }
 }
 
