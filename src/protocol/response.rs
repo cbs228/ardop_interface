@@ -105,6 +105,23 @@ pub enum ConnectionStateChange {
     /// indicates that the peer has successfully received all
     /// outstanding data.
     SendBuffer(u64),
+
+    /// Announces that this station has become the sender
+    ///
+    /// In the ARDOP protocol, at most one station is the
+    /// sending side (`ISS`). This state indicates that
+    /// the current station has become the sender.
+    Sending,
+
+    /// Announces that this station has become the receiver
+    ///
+    /// In the ARDOP protocol, at most one station is the
+    /// sending side (`ISS`). This state indicates that
+    /// the current station has become the sender.
+    ///
+    /// Even in the receiving state, a station will still
+    /// transmit acknowledgement packets.
+    Receiving,
 }
 
 /// Event messages

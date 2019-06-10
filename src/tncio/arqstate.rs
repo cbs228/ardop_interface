@@ -197,8 +197,7 @@ impl ArqState {
     /// Higher-level logic is responsible for this behavior.
     pub fn shutdown_write(&mut self) {
         if !self.closed_write {
-            info!(target:"ARQ", "Sending disconnect request to peer ({})",
-                  self.info.peer_call());
+            info!(target:"ARQSTATUS", "DISCONNECTING {}", &self);
         }
         self.closed_write = true;
     }
@@ -495,17 +494,22 @@ impl ArqState {
                 }
                 self.last_reported_buffer = newbuf;
             }
+            ConnectionStateChange::Sending => {
+                info!(target:"ARQSTATUS", "SENDING {}", &self);
+            }
+            ConnectionStateChange::Receiving => {
+                info!(target:"ARQSTATUS", "RECEIVING {}", &self);
+            }
             _ => { /* no-op */ }
         }
     }
 
     // mark this connection as closed
     fn mark_closed(&mut self) {
-        info!(target: "ARQ", "Connection to {} CLOSED", self.info.peer_call());
-        info!(target: "ARQSTATUS", "{}", &self);
         self.closed_read = true;
         self.closed_write = true;
         self.final_elapsed_time = Some(self.open_time.elapsed());
+        info!(target: "ARQSTATUS", "DISCONNECTED {}", &self);
     }
 }
 

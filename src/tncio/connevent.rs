@@ -118,6 +118,12 @@ impl ConnEventParser {
                     Some(ConnectionStateChange::Failed(
                         ConnectionFailedReason::NoAnswer,
                     ))
+                } else if self.is_connected {
+                    match &self.last_arq_state {
+                        &State::ISS => Some(ConnectionStateChange::Sending),
+                        &State::IRS => Some(ConnectionStateChange::Receiving),
+                        _ => None
+                    }
                 } else {
                     None
                 }
@@ -180,6 +186,17 @@ mod test {
     fn test_disconnect_vs_failure() {
         let mut evh = ConnEventParser::new("W0EME");
         evh.process(Event::CONNECTED("W1AW".to_owned(), 500, None));
+        let e1 = evh.process(Event::NEWSTATE(State::IRS));
+        match e1 {
+            Some(ConnectionStateChange::Receiving) => assert!(true),
+            _ => assert!(false),
+        }
+        let e1 = evh.process(Event::NEWSTATE(State::ISS));
+        match e1 {
+            Some(ConnectionStateChange::Sending) => assert!(true),
+            _ => assert!(false),
+        }
+
         let e1 = evh.process(Event::NEWSTATE(State::DISC));
         match e1 {
             None => assert!(true),
