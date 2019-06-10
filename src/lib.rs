@@ -17,7 +17,7 @@ extern crate futures;
 extern crate log;
 extern crate async_timer;
 extern crate num;
-extern crate romio;
+extern crate runtime;
 
 pub mod arq;
 pub mod framer;

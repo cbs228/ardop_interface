@@ -26,7 +26,7 @@ use futures::task::{Context, Poll, SpawnExt};
 
 use async_timer::Timed;
 
-use romio::TcpStream;
+use runtime::net::TcpStream;
 
 use super::busylock;
 use super::controlstream;
@@ -46,9 +46,6 @@ use crate::tnc::{TncError, TncResult};
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
 
-// Set TCP keepalive pings
-const TCP_KEEPALIVE: Duration = Duration::from_secs(15);
-
 // Default timeout for local TNC commands
 const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(20000);
 
@@ -65,7 +62,7 @@ const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
 /// task.
 pub struct AsyncTnc<I, P>
 where
-    I: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    I: AsyncRead + AsyncWrite + Unpin + Send,
     P: SpawnExt,
 {
     #[allow(unused)]
@@ -84,7 +81,7 @@ pub type AsyncTncTcp = AsyncTnc<TcpStream, ThreadPool>;
 
 impl<I: 'static, P> AsyncTnc<I, P>
 where
-    I: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    I: AsyncRead + AsyncWrite + Unpin + Send,
     P: SpawnExt,
 {
     /// Connect to an ARDOP TNC
@@ -123,14 +120,6 @@ where
         // connect
         let stream_control: TcpStream = TcpStream::connect(control_addr).await?;
         let stream_data: TcpStream = TcpStream::connect(&data_addr).await?;
-
-        // set keepalive
-        stream_control
-            .set_keepalive(Some(TCP_KEEPALIVE.clone()))
-            .expect("Can't set keepalive on control socket");
-        stream_data
-            .set_keepalive(Some(TCP_KEEPALIVE.clone()))
-            .expect("Can't set keepalive on data socket");
 
         let mut out = AsyncTnc::new_from_streams(
             spawner,
@@ -628,7 +617,7 @@ where
 
 impl<I, P> Unpin for AsyncTnc<I, P>
 where
-    I: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    I: AsyncRead + AsyncWrite + Unpin + Send,
     P: SpawnExt,
 {
 }
