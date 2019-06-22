@@ -122,7 +122,7 @@ impl ConnEventParser {
                     match &self.last_arq_state {
                         &State::ISS => Some(ConnectionStateChange::Sending),
                         &State::IRS => Some(ConnectionStateChange::Receiving),
-                        _ => None
+                        _ => None,
                     }
                 } else {
                     None

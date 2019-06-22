@@ -133,12 +133,11 @@ where
         // with an error instead.
         match out.initialize().await {
             Ok(()) => {
-                info!(target:"tnc", "Initialized ARDOP TNC at {}", &control_addr);
+                info!("Initialized ARDOP TNC at {}", &control_addr);
                 Ok(out)
             }
             Err(e) => {
                 error!(
-                    target: "tnc",
                     "Unable to initialize ARDOP TNC at {}: {}",
                     &control_addr, &e
                 );
@@ -314,11 +313,11 @@ where
         .await
         {
             Ok(cmdok) => {
-                debug!(target: "tnc", "Command {} OK", cmdok.0);
+                debug!("Command {} OK", cmdok.0);
                 Ok(())
             }
             Err(e) => {
-                warn!(target: "tnc", "Command failed: {}", &e);
+                warn!("Command failed: {}", &e);
                 Err(e)
             }
         }
@@ -371,13 +370,17 @@ where
         self.command(command::arqbw(bw, bw_forced)).await?;
 
         // wait for clear air, but give up after busy_timeout
-        info!(target:"tnc", "Connecting to {}: waiting for clear channel...", &target_string);
+        info!(
+            "Connecting to {}: waiting for clear channel...",
+            &target_string
+        );
         match Timed::platform_new(self.busy_mutex.lock(), busy_timeout).await {
             Err(_e) => {
-                info!(target:"tnc",
-                      "Connection to {} failed: {}",
-                      &target_string,
-                      &ConnectionFailedReason::Busy);
+                info!(
+                    "Connection to {} failed: {}",
+                    &target_string,
+                    &ConnectionFailedReason::Busy
+                );
                 return Ok(Err(ConnectionFailedReason::Busy));
             }
             Ok(_inner) => { /* no-op */ }
@@ -387,17 +390,20 @@ where
         //
         // success here merely indicates that a connect request is
         // in-flight
-        info!(target:"tnc", "Connecting to {}: dialing at {} Hz BW...", &target_string, bw);
+        info!(
+            "Connecting to {}: dialing at {} Hz BW...",
+            &target_string, bw
+        );
         match self
             .command(command::arqcall(target_string.clone(), attempts))
             .await
         {
             Ok(()) => { /* no-op */ }
             Err(e) => {
-                error!(target:"tnc",
-                      "Connection to {} failed: TNC rejected request: {}.",
-                      &target_string,
-                      &e);
+                error!(
+                    "Connection to {} failed: TNC rejected request: {}.",
+                    &target_string, &e
+                );
                 return Err(e);
             }
         }
@@ -406,20 +412,15 @@ where
         loop {
             match self.next_state_change().await? {
                 ConnectionStateChange::Connected(info) => {
-                    info!(target:"tnc", "CONNECTED {}", &info);
+                    info!("CONNECTED {}", &info);
                     return Ok(Ok(info));
                 }
                 ConnectionStateChange::Failed(fail) => {
-                    info!(target:"tnc",
-                          "Connection to {} failed: {}",
-                          &target_string,
-                          &fail);
+                    info!("Connection to {} failed: {}", &target_string, &fail);
                     return Ok(Err(fail));
                 }
                 ConnectionStateChange::Closed => {
-                    info!(target:"tnc",
-                          "Connection to {} failed: not connected",
-                          &target_string);
+                    info!("Connection to {} failed: not connected", &target_string);
                     return Ok(Err(ConnectionFailedReason::NoAnswer));
                 }
                 _ => { /* ignore */ }
@@ -459,25 +460,22 @@ where
         self.command(command::arqbw(bw, bw_forced)).await?;
         self.command(command::listen(true)).await?;
 
-        info!(target:"tnc",
-              "Listening for {} at {} Hz...",
-              self.mycall(), bw);
+        info!("Listening for {} at {} Hz...", self.mycall(), bw);
 
         // wait until we connect
         loop {
             match self.next_state_change_timeout(Duration::from_secs(0)).await {
                 Err(_timeout) => break,
                 Ok(ConnectionStateChange::Connected(info)) => {
-                    info!(target:"tnc", "CONNECTED {}", &info);
+                    info!("CONNECTED {}", &info);
                     self.command(command::listen(false)).await?;
                     return Ok(Ok(info));
                 }
                 Ok(ConnectionStateChange::Failed(fail)) => {
-                    info!(target:"tnc", "Incoming connection failed: {}", fail);
+                    info!("Incoming connection failed: {}", fail);
                 }
                 Ok(ConnectionStateChange::Closed) => {
-                    info!(target:"tnc",
-                          "Incoming connection failed: not connected");
+                    info!("Incoming connection failed: not connected");
                 }
                 _ => continue,
             }
@@ -508,7 +506,7 @@ where
             {
                 Err(_timeout) => {
                     // disconnect timeout; try to abort
-                    warn!(target:"tnc", "Disconnect timed out. Trying to abort.");
+                    warn!("Disconnect timed out. Trying to abort.");
                     let _ = self.command(command::abort()).await;
                     continue;
                 }
@@ -638,7 +636,7 @@ where
     F: fmt::Display,
 {
     let send_raw = cmd.to_string();
-    debug!(target:"tnc", "Sending TNC command: {}", &send_raw);
+    debug!("Sending TNC command: {}", &send_raw);
 
     // send
     let _ = Timed::platform_new(outp.send(send_raw), timeout.clone()).await?;

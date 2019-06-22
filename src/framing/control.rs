@@ -39,7 +39,7 @@ impl Decoder for TncControlFraming {
         let _ = src.advance(res.0);
 
         match &res.1 {
-            Some(ref resp) => trace!(target:"control", "Control received: {:?}", resp),
+            Some(ref resp) => trace!("Control received: {:?}", resp),
             _ => (),
         }
 

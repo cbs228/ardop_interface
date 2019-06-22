@@ -79,6 +79,7 @@ pub async fn busy_lock_task<S, K>(
             Timed::platform_new(src.next(), clear_time.clone()).await
         };
 
+        trace!("TNC Event: {:?}", &res);
         match res {
             Ok(Some(Event::BUSY(true))) => {
                 // grab the lock, if we don't have it

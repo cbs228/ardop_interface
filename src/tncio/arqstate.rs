@@ -197,7 +197,7 @@ impl ArqState {
     /// Higher-level logic is responsible for this behavior.
     pub fn shutdown_write(&mut self) {
         if !self.closed_write {
-            info!(target:"ARQSTATUS", "DISCONNECTING {}", &self);
+            info!("DISCONNECTING {}", &self);
         }
         self.closed_write = true;
     }
@@ -323,7 +323,7 @@ impl ArqState {
 
         if self.bytecount_tx_unacknowledged + self.bytecount_tx_staged > SEND_HWM {
             // Too much data queued.
-            debug!(target:"ARQ", "Inhibiting write while buffer longer than SEND_HWM");
+            debug!("Inhibiting write while buffer longer than SEND_HWM");
 
             // Try to flush. If we haven't flushed, then
             // apply backpressure and don't accept any more
@@ -400,7 +400,7 @@ impl ArqState {
             ready!(self.poll_next_data_or_event(io, cx, false))?;
 
             if self.bytecount_tx_unacknowledged + self.bytecount_tx_staged <= 0 {
-                debug!(target:"ARQ", "All buffered data flushed to peer.");
+                debug!("All buffered data flushed to peer.");
                 return Poll::Ready(Ok(()));
             }
         }
@@ -425,7 +425,7 @@ impl ArqState {
         while !self.closed_read {
             let data_event: DataEvent = match ready!(Pin::new(&mut *src).poll_next(cx)) {
                 None => {
-                    error!(target: "ARQ", "Lost connection to local ARDOP TNC");
+                    error!("Lost connection to local ARDOP TNC");
                     self.mark_closed();
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::ConnectionReset,
@@ -465,7 +465,7 @@ impl ArqState {
 
     // processes a connection-relevant event
     fn handle_event(&mut self, event: ConnectionStateChange) {
-        trace!(target:"ARQ", "ARQ Event: {:?}", &event);
+        trace!("ARQ Event: {:?}", &event);
         match event {
             ConnectionStateChange::Closed => {
                 // This connection has gone away.
@@ -484,21 +484,21 @@ impl ArqState {
                     let bytes_done = min(bytes_ack, self.bytecount_tx_unacknowledged);
                     self.bytecount_tx_unacknowledged -= bytes_done;
                     self.bytecount_tx += bytes_done;
-                    debug!(target: "ARQ", "Peer ACK'd {} bytes", bytes_done);
+                    debug!("Peer ACK'd {} bytes", bytes_done);
                 } else {
                     let bytes_accpt =
                         min(self.bytecount_tx_staged, newbuf - self.last_reported_buffer);
                     self.bytecount_tx_unacknowledged += bytes_accpt;
                     self.bytecount_tx_staged -= bytes_accpt;
-                    debug!(target: "ARQ", "TNC accepted {} bytes", bytes_accpt);
+                    debug!("TNC accepted {} bytes", bytes_accpt);
                 }
                 self.last_reported_buffer = newbuf;
             }
             ConnectionStateChange::Sending => {
-                info!(target:"ARQSTATUS", "SENDING {}", &self);
+                info!("SENDING {}", &self);
             }
             ConnectionStateChange::Receiving => {
-                info!(target:"ARQSTATUS", "RECEIVING {}", &self);
+                info!("RECEIVING {}", &self);
             }
             _ => { /* no-op */ }
         }
@@ -509,7 +509,7 @@ impl ArqState {
         self.closed_read = true;
         self.closed_write = true;
         self.final_elapsed_time = Some(self.open_time.elapsed());
-        info!(target: "ARQSTATUS", "DISCONNECTED {}", &self);
+        info!("DISCONNECTED {}", &self);
     }
 }
 

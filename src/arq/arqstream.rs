@@ -195,8 +195,11 @@ impl AsyncWrite for ArqStream {
                 Poll::Ready(Ok(k))
             }
             Err(e) => {
-                error!(target:"ARQ", "Unclean disconnect to {}: {}",
-                       this.state.info().peer_call(), &e);
+                error!(
+                    "Unclean disconnect to {}: {}",
+                    this.state.info().peer_call(),
+                    &e
+                );
                 this.state.shutdown_read();
                 Poll::Ready(Err(e))
             }
@@ -210,6 +213,9 @@ impl Drop for ArqStream {
         if !self.is_open() {
             return;
         }
+
+        // Mark as closed for writing
+        self.state.shutdown_write();
 
         // We can't use the default LocalPool when our
         // thread is running within an async { … } context...
@@ -227,6 +233,9 @@ impl Drop for ArqStream {
         })
         .join()
         .expect("Unable to join disconnect thread");
+
+        // Mark as fully disconnected
+        self.state.shutdown_read();
     }
 }
 
