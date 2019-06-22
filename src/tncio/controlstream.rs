@@ -10,8 +10,9 @@ use std::collections::vec_deque::VecDeque;
 use std::io;
 use std::marker::Unpin;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use futures::lock::Mutex;
 use futures::prelude::*;
 use futures::task::Context;
 use futures::task::Poll;
@@ -61,7 +62,10 @@ where
         state: stateref.clone(),
     };
 
-    let sink = ControlSink { state: stateref };
+    let sink = ControlSink {
+        state: stateref,
+        outqueue: VecDeque::with_capacity(32),
+    };
 
     (ctrl, results, sink)
 }
@@ -99,6 +103,7 @@ where
     I: AsyncRead + AsyncWrite + Unpin,
 {
     state: Arc<Mutex<ControlState<I>>>,
+    outqueue: VecDeque<String>,
 }
 
 impl<I> Unpin for ControlStreamEvents<I> where I: AsyncRead + AsyncWrite + Unpin {}
@@ -113,8 +118,8 @@ where
 {
     type Item = Event;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut state = (*self).state.lock().unwrap();
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
 
         loop {
             // anything in the Event queue?
@@ -140,11 +145,11 @@ where
 {
     type Item = CommandResult;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut state = (*self).state.lock().unwrap();
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
 
         loop {
-            // anything in the Event queue?
+            // anything in the Result queue?
             if let Some(out) = state.result_queue.pop_front() {
                 return Poll::Ready(Some(out));
             }
@@ -196,26 +201,37 @@ where
     type SinkError = io::Error;
 
     fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::SinkError>> {
-        // we are always ready to receive
-        Poll::Ready(Ok(()))
+        // we are ready if the outgoing I/O is ready
+        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
+        Pin::new(&mut state.io).poll_ready(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: String) -> Result<(), Self::SinkError> {
-        // encode the item
-        let mut state = (*self).state.lock().unwrap();
-        Pin::new(&mut state.io).start_send(item)
+    fn start_send(mut self: Pin<&mut Self>, item: String) -> Result<(), Self::SinkError> {
+        // accept into internal buffer
+        Ok((*self).outqueue.push_back(item))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
-        let mut state = (*self).state.lock().unwrap();
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+        let this = &mut (*self);
+        let state_mutex = &mut this.state;
+        let outqueue = &mut this.outqueue;
+
+        let mut state = ready!(Pin::new(&mut state_mutex.lock()).poll(cx));
+
+        // foreach item in the queue, try to submit it to the stream
+        // every call to start_send() needs a call to poll_ready()
+        while !outqueue.is_empty() {
+            ready!(Pin::new(&mut state.io).poll_ready(cx))?;
+            Pin::new(&mut state.io).start_send(outqueue.pop_front().unwrap())?;
+        }
         Pin::new(&mut state.io).poll_flush(cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
-        let mut state = (*self).state.lock().unwrap();
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
         Pin::new(&mut state.io).poll_close(cx)
     }
 }
