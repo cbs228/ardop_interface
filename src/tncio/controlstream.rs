@@ -12,6 +12,7 @@ use std::marker::Unpin;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::channel::mpsc;
 use futures::lock::Mutex;
 use futures::prelude::*;
 use futures::task::Context;
@@ -45,10 +46,13 @@ pub fn controlstream<I>(
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
+    let (evt_tx, evt_rx) = mpsc::unbounded();
+    let (res_tx, res_rx) = mpsc::unbounded();
+
     let state = ControlState {
         io: Framed::new(control, TncControlFraming::new()),
-        event_queue: VecDeque::with_capacity(32),
-        result_queue: VecDeque::with_capacity(32),
+        dest_events: evt_tx,
+        dest_results: res_tx,
         fused: false,
     };
 
@@ -56,10 +60,12 @@ where
 
     let ctrl = ControlStreamEvents {
         state: stateref.clone(),
+        events: evt_rx,
     };
 
     let results = ControlStreamResults {
         state: stateref.clone(),
+        results: res_rx,
     };
 
     let sink = ControlSink {
@@ -76,8 +82,8 @@ where
     I: AsyncRead + AsyncWrite + Unpin,
 {
     io: Framed<I, TncControlFraming>,
-    event_queue: VecDeque<Event>,
-    result_queue: VecDeque<CommandResult>,
+    dest_events: mpsc::UnboundedSender<Event>,
+    dest_results: mpsc::UnboundedSender<CommandResult>,
     fused: bool,
 }
 
@@ -87,6 +93,7 @@ where
     I: AsyncRead + AsyncWrite + Unpin,
 {
     state: Arc<Mutex<ControlState<I>>>,
+    events: mpsc::UnboundedReceiver<Event>,
 }
 
 /// Stream of TNC Command Results
@@ -95,6 +102,7 @@ where
     I: AsyncRead + AsyncWrite + Unpin,
 {
     state: Arc<Mutex<ControlState<I>>>,
+    results: mpsc::UnboundedReceiver<CommandResult>,
 }
 
 /// Sink for outgoing TNC commands
@@ -119,15 +127,15 @@ where
     type Item = Event;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
-
+        let this = &mut (*self);
         loop {
             // anything in the Event queue?
-            if let Some(out) = state.event_queue.pop_front() {
+            if let Ok(Some(out)) = this.events.try_next() {
                 return Poll::Ready(Some(out));
             }
 
             // none, so read from the stream
+            let mut state = ready!(Pin::new(&mut this.state.lock()).poll(cx));
             match ready!(Pin::new(&mut *state).poll_next(cx)) {
                 // EOF
                 None => return Poll::Ready(None),
@@ -146,15 +154,16 @@ where
     type Item = CommandResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
+        let this = &mut (*self);
 
         loop {
             // anything in the Result queue?
-            if let Some(out) = state.result_queue.pop_front() {
+            if let Ok(Some(out)) = this.results.try_next() {
                 return Poll::Ready(Some(out));
             }
 
             // none, so read from the stream
+            let mut state = ready!(Pin::new(&mut this.state.lock()).poll(cx));
             match ready!(Pin::new(&mut *state).poll_next(cx)) {
                 // EOF
                 None => return Poll::Ready(None),
@@ -182,14 +191,20 @@ where
                 (*self).fused = true;
                 Poll::Ready(None)
             }
-            Some(Response::CommandResult(res)) => {
-                (*self).result_queue.push_back(res);
-                Poll::Ready(Some(()))
-            }
-            Some(Response::Event(evt)) => {
-                (*self).event_queue.push_back(evt);
-                Poll::Ready(Some(()))
-            }
+            Some(Response::CommandResult(res)) => match (*self).dest_results.unbounded_send(res) {
+                Ok(_ok) => Poll::Ready(Some(())),
+                Err(_e) => {
+                    (*self).fused = true;
+                    Poll::Ready(None)
+                }
+            },
+            Some(Response::Event(evt)) => match (*self).dest_events.unbounded_send(evt) {
+                Ok(_ok) => Poll::Ready(Some(())),
+                Err(_e) => {
+                    (*self).fused = true;
+                    Poll::Ready(None)
+                }
+            },
         }
     }
 }
