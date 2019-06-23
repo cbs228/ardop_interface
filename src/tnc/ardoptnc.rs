@@ -338,7 +338,7 @@ impl ArdopTnc {
         self.inner.lock().await.event_timeout().clone()
     }
 
-    /// Sets timeout for the control connection
+    /// Sets timeout for events
     ///
     /// Limits the amount of time that the client is willing
     /// to wait for a connection-related event, such as a

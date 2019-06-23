@@ -5,8 +5,8 @@
 //! *messages* into raw *bytes*. The caller must provide
 //! a codec which implements `Encoder` and `Decoder`.
 //!
-//! See `crate::framing::data::TncDataFraming` for an
-//! example codec.
+//! The `ardop_interface` "`echoserver`" example
+//! demonstrates a very simple framer in action.
 
 use std::io;
 use std::marker::Unpin;
