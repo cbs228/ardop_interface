@@ -7,7 +7,6 @@ use std::string::String;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::executor::ThreadPool;
 use futures::lock::Mutex;
 
 use super::TncResult;
@@ -16,9 +15,6 @@ use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::tncio::asynctnc::AsyncTncTcp;
-
-/// Default minimum clear time for new outgoing connections
-pub const DEFAULT_MIN_CLEAR_TIME: &Duration = &Duration::from_secs(15);
 
 /// TNC Interface
 pub struct ArdopTnc {
@@ -47,81 +43,12 @@ impl ArdopTnc {
     where
         S: Into<String>,
     {
-        let pool = ThreadPool::new().expect("Could not create TNC thread pool");
-        ArdopTnc::new_from_pool(addr, mycall, DEFAULT_MIN_CLEAR_TIME, pool).await
-    }
+        let mycall = mycall.into();
+        let mycall2 = mycall.clone();
 
-    /// Connect to an ARDOP TNC
-    ///
-    /// Returns a future which will connect to an ARDOP TNC
-    /// and initialize it.
-    ///
-    /// # Parameters
-    /// - `addr`: Network address of the ARDOP TNC's control port.
-    /// - `mycall`: The formally-assigned callsign for your station.
-    ///   Legitimate call signs include from 3 to 7 ASCII characters
-    ///   (A-Z, 0-9) followed by an optional "`-`" and an SSID of
-    ///   `-0` to `-15` or `-A` to `-Z`. An SSID of `-0` is treated
-    ///   as no SSID.
-    /// - `min_clear_time`: Minimum duration for channel to be clear
-    ///   in order for outgoing connection requests to be made. This
-    ///   value cannot be changed after the TNC is instantiated.
-    ///
-    /// # Returns
-    /// A new `ArdopTnc`, or an error if the connection or
-    /// initialization step fails.
-    pub async fn new_with_clear_time<'a, S>(
-        addr: &'a SocketAddr,
-        mycall: S,
-        min_clear_time: &'a Duration,
-    ) -> TncResult<Self>
-    where
-        S: Into<String>,
-    {
-        let pool = ThreadPool::new().expect("Could not create TNC thread pool");
-        ArdopTnc::new_from_pool(addr, mycall, min_clear_time, pool).await
-    }
-
-    /// Connect to an ARDOP TNC
-    ///
-    /// Returns a future which will connect to an ARDOP TNC
-    /// and initialize it.
-    ///
-    /// # Parameters
-    /// - `addr`: Network address of the ARDOP TNC's control port.
-    /// - `mycall`: The formally-assigned callsign for your station.
-    ///   Legitimate call signs include from 3 to 7 ASCII characters
-    ///   (A-Z, 0-9) followed by an optional "`-`" and an SSID of
-    ///   `-0` to `-15` or `-A` to `-Z`. An SSID of `-0` is treated
-    ///   as no SSID.
-    /// - `min_clear_time`: Minimum duration for channel to be clear
-    ///   in order for outgoing connection requests to be made. This
-    ///   value cannot be changed after the TNC is instantiated.
-    /// - `pool`: A `ThreadPool` which will be used to schedule TNC
-    ///   tasks. At present, the TNC must run a task in the
-    ///   background in order to keep the channel free/clear indicator
-    ///   current.
-    ///
-    /// # Returns
-    /// A new `ArdopTnc`, or an error if the connection or
-    /// initialization step fails.
-    pub async fn new_from_pool<'a, S>(
-        addr: &'a SocketAddr,
-        mycall: S,
-        min_clear_time: &'a Duration,
-        pool: ThreadPool,
-    ) -> TncResult<Self>
-    where
-        S: Into<String>,
-    {
-        let mycallstr = mycall.into();
-        let mycallstr2 = mycallstr.clone();
-        let tnc = AsyncTncTcp::new(pool, addr, mycallstr2, min_clear_time.clone()).await?;
+        let tnc = AsyncTncTcp::new(addr, mycall2).await?;
         let inner = Arc::new(Mutex::new(tnc));
-        Ok(ArdopTnc {
-            inner,
-            mycall: mycallstr,
-        })
+        Ok(ArdopTnc { inner, mycall })
     }
 
     /// Get this station's callsign
@@ -149,8 +76,6 @@ impl ArdopTnc {
     ///   at all.
     /// - `attempts`: Number of connection attempts to make
     ///   before giving up
-    /// - `busy_timeout`: Wait this long, at maximum, for a clear
-    ///   channel before giving up.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -166,16 +91,12 @@ impl ArdopTnc {
         bw: u16,
         bw_forced: bool,
         attempts: u16,
-        busy_timeout: Duration,
     ) -> TncResult<Result<ArqStream, ConnectionFailedReason>>
     where
         S: Into<String>,
     {
         let mut tnc = self.inner.lock().await;
-        match tnc
-            .connect(target, bw, bw_forced, attempts, busy_timeout)
-            .await?
-        {
+        match tnc.connect(target, bw, bw_forced, attempts).await? {
             Ok(nfo) => Ok(Ok(ArqStream::new(self.inner.clone(), nfo))),
             Err(e) => Ok(Err(e)),
         }
