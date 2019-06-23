@@ -13,24 +13,19 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::string::String;
-use std::sync::Arc;
 use std::time::Duration;
 
-use futures::channel::mpsc;
-use futures::executor::ThreadPool;
 use futures::io::{AsyncRead, AsyncWrite};
-use futures::lock::Mutex;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{Stream, StreamExt};
-use futures::task::{Context, Poll, SpawnExt};
+use futures::task::{Context, Poll};
 
 use async_timer::Timed;
 
 use runtime::net::TcpStream;
 
-use super::busylock;
 use super::controlstream;
-use super::controlstream::{ControlSink, ControlStreamResults};
+use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
 use super::data::DataOut;
 use super::dataevent::{DataEvent, DataEventStream};
 
@@ -40,7 +35,7 @@ use crate::framing::data::TncDataFraming;
 use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
-use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange, Event};
+use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
 use crate::tnc::{TncError, TncResult};
 
 // Offset between control port and data port
@@ -60,29 +55,24 @@ const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
 /// This object communicates with the ARDOP program
 /// via TCP, and it holds all I/O resources for this
 /// task.
-pub struct AsyncTnc<I, P>
+pub struct AsyncTnc<I>
 where
     I: AsyncRead + AsyncWrite + Unpin + Send,
-    P: SpawnExt,
 {
-    #[allow(unused)]
-    spawner: P,
-    data_stream: DataEventStream<Framed<I, TncDataFraming>, mpsc::UnboundedReceiver<Event>>,
+    data_stream: DataEventStream<Framed<I, TncDataFraming>, ControlStreamEvents<I>>,
     control_in_res: ControlStreamResults<I>,
     control_out: ControlSink<I>,
-    busy_mutex: Arc<Mutex<()>>,
     control_timeout: Duration,
     event_timeout: Duration,
     disconnect_progress: DisconnectProgress,
 }
 
 /// Type specialization for public API
-pub type AsyncTncTcp = AsyncTnc<TcpStream, ThreadPool>;
+pub type AsyncTncTcp = AsyncTnc<TcpStream>;
 
-impl<I: 'static, P> AsyncTnc<I, P>
+impl<I: 'static> AsyncTnc<I>
 where
     I: AsyncRead + AsyncWrite + Unpin + Send,
-    P: SpawnExt,
 {
     /// Connect to an ARDOP TNC
     ///
@@ -90,8 +80,6 @@ where
     /// and initialize it.
     ///
     /// # Parameters
-    /// - `spawner`: A `LocalPool` or a `ThreadPool` which will be
-    ///   used to spawn TNC-related tasks.
     /// - `control_addr`: Network address of the ARDOP TNC's
     ///   control port.
     /// - `mycall`: The formally-assigned callsign for your station.
@@ -99,21 +87,13 @@ where
     ///   (A-Z, 0-9) followed by an optional "`-`" and an SSID of
     ///   `-0` to `-15` or `-A` to `-Z`. An SSID of `-0` is treated
     ///   as no SSID.
-    /// - `min_clear_time`: Minimum duration for channel to be clear
-    ///   in order for outgoing connection requests to be made.
     ///
     /// # Returns
     /// A new `AsyncTnc`, or an error if the connection or
     /// initialization step fails.
-    pub async fn new<S>(
-        mut spawner: P,
-        control_addr: &SocketAddr,
-        mycall: S,
-        min_clear_time: Duration,
-    ) -> TncResult<AsyncTnc<TcpStream, P>>
+    pub async fn new<S>(control_addr: &SocketAddr, mycall: S) -> TncResult<AsyncTnc<TcpStream>>
     where
         S: Into<String>,
-        P: SpawnExt,
     {
         let data_addr = SocketAddr::new(control_addr.ip(), control_addr.port() + DATA_PORT_OFFSET);
 
@@ -121,13 +101,7 @@ where
         let stream_control: TcpStream = TcpStream::connect(control_addr).await?;
         let stream_data: TcpStream = TcpStream::connect(&data_addr).await?;
 
-        let mut out = AsyncTnc::new_from_streams(
-            spawner,
-            stream_control,
-            stream_data,
-            mycall,
-            min_clear_time,
-        );
+        let mut out = AsyncTnc::new_from_streams(stream_control, stream_data, mycall);
 
         // Try to initialize the TNC. If we fail here, we will bail
         // with an error instead.
@@ -149,8 +123,6 @@ where
     /// New from raw I/O types
     ///
     /// # Parameters
-    /// - `spawner`: A `LocalPool` or a `ThreadPool` which will be
-    ///   used to spawn TNC-related tasks.
     /// - `stream_control`: I/O stream to the TNC's control port
     /// - `stream_data`: I/O stream to the TNC's data port
     /// - `mycall`: The formally-assigned callsign for your station.
@@ -158,19 +130,10 @@ where
     ///   (A-Z, 0-9) followed by an optional "`-`" and an SSID of
     ///   `-0` to `-15` or `-A` to `-Z`. An SSID of `-0` is treated
     ///   as no SSID.
-    /// - `min_clear_time`: Minimum duration for channel to be clear
-    ///   in order for outgoing connection requests to be made.
     ///
     /// # Returns
-    /// A new `AsyncTnc`. This method may panic if the `spawner`
-    /// cannot spawn new tasks.
-    pub(crate) fn new_from_streams<S>(
-        mut spawner: P,
-        stream_control: I,
-        stream_data: I,
-        mycall: S,
-        min_clear_time: Duration,
-    ) -> AsyncTnc<I, P>
+    /// A new `AsyncTnc`.
+    pub(crate) fn new_from_streams<S>(stream_control: I, stream_data: I, mycall: S) -> AsyncTnc<I>
     where
         S: Into<String>,
     {
@@ -178,29 +141,13 @@ where
         let (control_in_evt, control_in_res, control_out) =
             controlstream::controlstream(stream_control);
 
-        // spawn busy-detector task
-        let busy_mutex = Arc::new(Mutex::new(()));
-        let (busydet_tx, busydet_rx) = mpsc::unbounded();
-
-        spawner
-            .spawn(busylock::busy_lock_task(
-                control_in_evt,
-                busydet_tx,
-                busy_mutex.clone(),
-                min_clear_time,
-                None,
-            ))
-            .expect("Unable to spawn busy-channel detection task");
-
         // create data port input/output framer
         let data_inout = Framed::new(stream_data, TncDataFraming::new());
 
         AsyncTnc {
-            spawner,
-            data_stream: DataEventStream::new(mycall, data_inout, busydet_rx),
+            data_stream: DataEventStream::new(mycall, data_inout, control_in_evt),
             control_in_res,
             control_out,
-            busy_mutex,
             control_timeout: DEFAULT_TIMEOUT_COMMAND,
             event_timeout: DEFAULT_TIMEOUT_EVENT,
             disconnect_progress: DisconnectProgress::NoProgress,
@@ -340,8 +287,6 @@ where
     ///   at all.
     /// - `attempts`: Number of connection attempts to make
     ///   before giving up
-    /// - `busy_timeout`: Wait this long, at maximum, for a clear
-    ///   channel before giving up.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -357,7 +302,6 @@ where
         bw: u16,
         bw_forced: bool,
         attempts: u16,
-        busy_timeout: Duration,
     ) -> TncResult<Result<ConnectionInfo, ConnectionFailedReason>>
     where
         S: Into<String>,
@@ -368,23 +312,6 @@ where
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
         self.command(command::arqbw(bw, bw_forced)).await?;
-
-        // wait for clear air, but give up after busy_timeout
-        info!(
-            "Connecting to {}: waiting for clear channel...",
-            &target_string
-        );
-        match Timed::platform_new(self.busy_mutex.lock(), busy_timeout).await {
-            Err(_e) => {
-                info!(
-                    "Connection to {} failed: {}",
-                    &target_string,
-                    &ConnectionFailedReason::Busy
-                );
-                return Ok(Err(ConnectionFailedReason::Busy));
-            }
-            Ok(_inner) => { /* no-op */ }
-        }
 
         // dial
         //
@@ -613,12 +540,7 @@ where
     }
 }
 
-impl<I, P> Unpin for AsyncTnc<I, P>
-where
-    I: AsyncRead + AsyncWrite + Unpin + Send,
-    P: SpawnExt,
-{
-}
+impl<I> Unpin for AsyncTnc<I> where I: AsyncRead + AsyncWrite + Unpin + Send {}
 
 // Future which executes a command on the TNC
 //
@@ -755,7 +677,6 @@ mod test {
 
     use futures::channel::mpsc;
     use futures::executor;
-    use futures::executor::LocalPool;
     use futures::sink;
     use futures::stream;
     use futures::task;
@@ -847,19 +768,12 @@ mod test {
 
     #[test]
     fn test_streams() {
-        let mut pool = LocalPool::new();
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
         let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
 
-        let mut tnc = AsyncTnc::new_from_streams(
-            pool.spawner(),
-            stream_ctrl,
-            stream_data,
-            "W1AW",
-            Duration::from_secs(0),
-        );
+        let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
 
-        pool.run_until(async {
+        futures::executor::block_on(async {
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(_d)) => assert!(true),
                 _ => assert!(false),
