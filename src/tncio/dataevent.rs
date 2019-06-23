@@ -6,8 +6,9 @@ use std::io;
 use std::pin::Pin;
 use std::string::String;
 
+use futures::future::{select, Either, Future};
 use futures::sink::Sink;
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 use futures::task::{Context, Poll};
 
 use super::connevent::ConnEventParser;
@@ -46,6 +47,8 @@ where
     data_inout: D,
     event_in: E,
     conn_state: ConnEventParser,
+    data_eof: bool,
+    event_eof: bool,
 }
 
 impl<D, E> DataEventStream<D, E>
@@ -62,6 +65,8 @@ where
             data_inout: data,
             event_in: events,
             conn_state: ConnEventParser::new(mycall),
+            data_eof: false,
+            event_eof: false,
         }
     }
 
@@ -109,49 +114,52 @@ where
     type Item = DataEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut ctrl_eof = false;
-        let mut data_eof = false;
+        let this = &mut (*self);
 
-        match Pin::new(&mut (*self).data_inout).poll_next(cx) {
-            // got some peer data
-            Poll::Ready(Some(data)) => return Poll::Ready(Some(DataEvent::Data(data))),
-
-            // eof (that's bad!)
-            Poll::Ready(None) => data_eof = true,
-
-            // not yet (keep going)
-            Poll::Pending => { /* no-op */ }
-        }
-
-        // try to obtain the next connection event
-        loop {
-            match Pin::new(&mut (*self).event_in).poll_next(cx) {
-                // got an event, try to process it
-                Poll::Ready(Some(evt)) => {
-                    if let Some(conn_evt) = (*self).conn_state.process(evt) {
-                        return Poll::Ready(Some(DataEvent::Event(conn_evt)));
+        if !this.data_eof && !this.event_eof {
+            // both streams can be read
+            while !this.data_eof && !this.event_eof {
+                let mut either = select(this.data_inout.next(), this.event_in.next());
+                match ready!(Pin::new(&mut either).poll(cx)) {
+                    Either::Left((Some(data), _f)) => {
+                        return Poll::Ready(Some(DataEvent::Data(data)))
                     }
-                }
-
-                // eof (that's bad!)
-                Poll::Ready(None) => {
-                    ctrl_eof = true;
-                    break;
-                }
-
-                Poll::Pending => {
-                    break;
+                    Either::Left((None, _f)) => this.data_eof = true,
+                    Either::Right((Some(evt), _f)) => {
+                        // try to process this event
+                        if let Some(conn_evt) = this.conn_state.process(evt) {
+                            return Poll::Ready(Some(DataEvent::Event(conn_evt)));
+                        }
+                    }
+                    Either::Right((None, _f)) => this.event_eof = true,
                 }
             }
         }
 
-        if ctrl_eof && data_eof {
-            // we have exhausted all our inputs
-            Poll::Ready(None)
-        } else {
-            // one or more inputs still has data, but it's not ready yet
-            Poll::Pending
+        if !this.data_eof {
+            while !this.data_eof {
+                match ready!(Pin::new(&mut this.data_inout).poll_next(cx)) {
+                    Some(data) => return Poll::Ready(Some(DataEvent::Data(data))),
+                    None => this.data_eof = true,
+                }
+            }
+        } else if !this.event_eof {
+            while !this.event_eof {
+                match ready!(Pin::new(&mut this.event_in).poll_next(cx)) {
+                    Some(evt) =>
+                    // try to process this event
+                    {
+                        if let Some(conn_evt) = this.conn_state.process(evt) {
+                            return Poll::Ready(Some(DataEvent::Event(conn_evt)));
+                        }
+                    }
+                    None => this.event_eof = true,
+                }
+            }
         }
+
+        // all have EOF
+        Poll::Ready(None)
     }
 }
 
