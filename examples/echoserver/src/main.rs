@@ -11,6 +11,8 @@ extern crate stderrlog;
 
 mod newlineframer;
 
+use std::net::ToSocketAddrs;
+
 use clap::{App, Arg};
 use futures::prelude::*;
 
@@ -64,8 +66,12 @@ async fn main() {
         .init()
         .unwrap();
 
-    // parse socket address
-    let tnc_address = tnc_address_str.parse().expect("Invalid socket address");
+    // parse and resolve socket address of TNC
+    let tnc_address = tnc_address_str
+        .to_socket_addrs()
+        .expect("Invalid socket address")
+        .next()
+        .expect("Error resolving TNC address");
 
     // connect to TNC
     let mut tnc = ArdopTnc::new(&tnc_address, mycallstr)

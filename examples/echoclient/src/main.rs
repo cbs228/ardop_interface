@@ -8,6 +8,7 @@ extern crate futures;
 extern crate log;
 extern crate stderrlog;
 
+use std::net::ToSocketAddrs;
 use std::process::exit;
 use std::str;
 
@@ -83,8 +84,12 @@ async fn main() {
         .init()
         .unwrap();
 
-    // parse socket address
-    let tnc_address = tnc_address_str.parse().expect("Invalid socket address");
+    // parse and resolve socket address of TNC
+    let tnc_address = tnc_address_str
+        .to_socket_addrs()
+        .expect("Invalid socket address")
+        .next()
+        .expect("Error resolving TNC address");
 
     // connect to TNC
     let mut tnc = ArdopTnc::new(&tnc_address, mycallstr)
