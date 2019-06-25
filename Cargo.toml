@@ -18,3 +18,9 @@ runtime = "^0.3.0-alpha"
 git = 'https://github.com/DoumanAsh/async-timer.git'
 rev = '8420451f'
 features = ['romio_on']
+
+[workspace]
+members = [
+    "examples/echoclient",
+    "examples/echoserver"
+]

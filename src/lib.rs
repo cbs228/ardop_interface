@@ -144,21 +144,20 @@
 //! ./ardopc 8520 pulse pulse &
 //! ```
 //!
-//! Build and run the `echoserver` in the `examples/echoserver`
-//! directory with
+//! Build and run the `echoserver` package with
 //!
 //! ```bash
-//! cargo run -- localhost:8515 N0CALL-S 200
+//! cargo run --package echoserver -- localhost:8515 N0CALL-S 200
 //! ```
 //!
 //! Replace `N0CALL` with your callsign. The `-S` is a
 //! Service Set Identifier (SSID), which is an arbitrary
 //! single-character extension to your callsign.
 //!
-//! Now use the `echoclient` in `examples/echoclient`:
+//! Now run the `echoclient` with
 //!
 //! ```bash
-//! cargo run -- localhost:8520 N0CALL-C N0CALL-S 200
+//! cargo run --package echoclient -- localhost:8520 N0CALL-C N0CALL-S 200
 //! ```
 //!
 //! The `echoclient` will send a number of pre-programmed
