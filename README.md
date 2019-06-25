@@ -8,11 +8,11 @@ An Async Rust interface to the ARDOP TNC
 #![feature(async_await)]
 use std::net::SocketAddr;
 use futures::prelude::*;
-use futures::executor::block_on;
 
 use ardop_interface::tnc::*;
 
-block_on(async {
+#[runtime::main]
+async fn main() {
    let addr = "127.0.0.1:8515".parse().unwrap();
    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
        .await
@@ -23,7 +23,7 @@ block_on(async {
        .expect("Connection failed");
    conn.write_all(b"Hello, world!\n").await.unwrap();
    conn.close().await;
-});
+}
 ```
 
 See the `examples/` directory in the source code distribution

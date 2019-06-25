@@ -16,11 +16,11 @@
 //! #![feature(async_await)]
 //! use std::net::SocketAddr;
 //! use futures::prelude::*;
-//! use futures::executor::block_on;
 //!
 //! use ardop_interface::tnc::*;
 //!
-//! block_on(async {
+//! #[runtime::main]
+//! async fn main() {
 //!    let addr = "127.0.0.1:8515".parse().unwrap();
 //!    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
 //!        .await
@@ -32,7 +32,7 @@
 //!    if let Err(e) = tnc.set_gridsquare("EM00").await {
 //!         println!("Can't set GRIDSQUARE: {}", e);
 //!    }
-//! });
+//! }
 //! ```
 //!
 //! # TNC Commands
