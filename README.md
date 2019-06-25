@@ -1,4 +1,4 @@
-# ardop-interface
+# ardop_interface
 
 An Async Rust interface to the ARDOP TNC
 

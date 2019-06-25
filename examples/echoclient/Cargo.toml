@@ -1,11 +1,11 @@
 [package]
-name = "ardop-interface-echoclient"
+name = "echoclient"
 version = "0.1.0"
 authors = ["Colin S <3526918+cbs228@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
-ardop-interface = {path = "../.."}
+ardop_interface = {path = "../.."}
 clap = "^2.33"
 futures-preview = "^0.3.0-alpha"
 log = "^0.4.6"
