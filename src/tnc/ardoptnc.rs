@@ -17,6 +17,9 @@ use crate::protocol::command::Command;
 use crate::tncio::asynctnc::AsyncTncTcp;
 
 /// TNC Interface
+///
+/// See the [module-level](index.html) documentation
+/// for examples and usage details.
 pub struct ArdopTnc {
     inner: Arc<Mutex<AsyncTncTcp>>,
     mycall: String,

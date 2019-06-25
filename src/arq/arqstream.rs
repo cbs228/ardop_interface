@@ -22,6 +22,9 @@ use crate::tncio::arqstate::ArqState;
 use crate::tncio::asynctnc::AsyncTncTcp;
 
 /// A TCP-like interface for ARQ RF connections
+///
+/// See the [module-level](index.html) documentation
+/// for examples and usage details.
 pub struct ArqStream {
     tnc: Arc<Mutex<AsyncTncTcp>>,
     state: ArqState,

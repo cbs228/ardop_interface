@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Colin S <3526918+cbs228@users.noreply.github.com>"]
 edition = "2018"
 publish = false
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 ardop_interface = {path = "../.."}

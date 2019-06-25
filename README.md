@@ -2,6 +2,19 @@
 
 An Async Rust interface to the ARDOP TNC
 
+[Documentation](https://docs.rs/ardop_interface)
+
+## Introduction
+
+`ardop_interface` integrates with the Amateur Radio Digital
+Open Protocol ([ARDOP](https://ardop.groups.io/g/main)) soundcard
+modem softare. The ARDOP modem is intended to provide reliable,
+low-speed connectivity over High Frequency (HF) radio links.
+
+*This crate is not ARDOP.* This crate is only an interface. With
+this interface, and separate ARDOP modem software, you can build
+full-featured Rust applications that communicate over the radio.
+
 ## Minimal Example
 
 ```rust
@@ -26,44 +39,58 @@ async fn main() {
 }
 ```
 
-See the `examples/` directory in the source code distribution
-for a complete example client and server. The examples also
-demonstrate the `async` runtime, argument parsing, and logging.
+See the
+[`examples/`](https://github.com/cbs228/ardop_interface/tree/master/examples)
+directory in the source code repository for a complete client
+and server. The examples also demonstrate the `async` `runtime` crate,
+argument parsing, and logging.
 
-## Introduction
+## The ARDOP Modem
 
-`ardop_interface` integrates with the Amateur Radio Digital
-Open Protocol ([ARDOP](https://ardop.groups.io/g/main)) soundcard
-modem softare. This modem is intended for use with analog single
-sideband (SSB) transceivers over radio links. ARDOP is designed
-to perform well on the High Frequency (HF) bands, which are
-notoriously difficult to use.
+Like most amateur radio modems, ARDOP is designed to interface
+with analog, single-sideband (SSB) transceivers via a sound
+card interface. A computer—which may be a simple, single-board
+computer—turns data into sound, and back again.
 
-Unlike many older digital amateur modes, ARDOP is designed to
+ARDOP is designed to:
 
-* automatically retry failed data; and
-* use the fastest reliable mode for the available signal-to-noise
-  ratio (SNR).
+* Automatically retry failed transmissions. This mode of
+  operation is called *automatic repeat request* (ARQ),
+  and it helps ensure that data reaches its final destination.
 
-These properties make ARDOP suitable for use in
-automatically-controlled stations, which are not always manned
-by a control operator. Think of ARDOP as "*TCP for radio.*"
+* Use the fastest available mode for the signal-to-noise ratio
+  and band conditions
 
-*This crate is not ARDOP.* This crate is only an interface. In order
-to use this crate, you must download and install a compatible
-ARDOP software modem. ARDOP software is developed and released
-separately, by different developers, under a different open-source
-license than this crate.
+* Support unattended, automatic station operation
 
-This crate exposes an `async` Rust API to the ARDOP software.
-The [`ArqStream`](arq/struct.ArqStream.html) object is designed
-to mimic an async `TcpStream`. This substantially reduces the
-API surface of ARDOP, making it easier to incorporate into
-higher-level applications.
+* Perform well on the high frequency (HF) bands
+
+Best of all, ARDOP has an open development model. Full protocol
+specifications are available, and open-source implementations of
+the modem exist.
 
 ARDOP is intended for use by licensed radio amateurs. If you'd
 like to get started with the hobby, you should find a club,
 "hamfest," or "hamvention" near you!
+
+## The Rust Interface
+
+The ARDOP software has a standardized "terminal node controller"
+(TNC) interface for clients to use. To use the TNC, clients must
+make two simultaneous TCP connections and perform a great deal
+of serialization and de-serialization. This crate handles many
+of these details for you.
+
+This crate exposes an `async` API that many rustaceans will
+find familiar: socket programming. The
+[`ArqStream`](arq/index.html) object is designed
+to mimic an async `TcpStream`. Once a connection is made,
+data is exchanged with asynchronous reads from, and writes to,
+the `ArqStream` object.
+
+The `async` API allows ARDOP to coexist with native TCP sockets,
+GUIs, and other I/O processes while maintaining a small system
+resource footprint.
 
 ## Development Status
 
@@ -126,6 +153,13 @@ where
   it with the `pulse` device.
 
 ## Running the Examples
+
+The examples are not published to `crates.io.` You will need
+to clone our source repository instead:
+
+```bash
+git clone https://github.com/cbs228/ardop_interface.git
+```
 
 To conduct a local test of ARDOP, you must run two instances
 of the ARDOP modem. To make an acoustic channel between the
@@ -191,13 +225,14 @@ has a connectionless `FEC` protocol, which is UDP-like.
 The following other features are currently not implemented
 by this crate.
 
-* **Busy channel detection**: This interface relies on the
+* **ID frames**: ID frames are not yet supported. At present,
+  they are silently discarded.
+
+* **Pings**: Not yet supported.
+
+* **Busy channel detection**: This crate relies on the
   ARDOP TNC to perform busy channel detection. Support for
   this functionality varies across ARDOP implementations.
-
-* **ID frames**: ID frames are currently ignored and are not
-  processed. This can make it more difficult to discover
-  reachable peers.
 
 * **Rig control**: No type of rig control is presently
   integrated. This crate cannot provide the following
@@ -210,7 +245,7 @@ by this crate.
     The ARDOP TNC may be able to do this for you. `ardopc` can
     key transmitters over a serial connection.
 
-  * **Scanning**: The ARDOP frequency agilty / scanning functions
+  * **Scanning**: The ARDOP frequency agility / scanning functions
     in `LISTEN` mode are not supported
 
 ## Next Steps
@@ -221,5 +256,9 @@ ionosphere is the limit!
 
 ## Further Reading
 
-* [`tnc`](tnc/index.html): Main TNC command and control
-* [`arq`](arq/index.html): Reliable ARQ connections
+* [`tnc`](tnc/index.html): Main TNC command and control via the
+  `ArdopTnc`
+* [`arq`](arq/index.html): Reliable ARQ connections with
+  `ArqStream`
+
+License: MIT OR Apache-2.0
