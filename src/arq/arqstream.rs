@@ -9,7 +9,6 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use futures::executor;
@@ -220,22 +219,18 @@ impl Drop for ArqStream {
         // Mark as closed for writing
         self.state.shutdown_write();
 
-        // We can't use the default LocalPool when our
-        // thread is running within an async { … } context...
-        // which, for this application, is all the time.
+        // This will panic if a LocalPool is being used to
+        // provide the asynchronous runtime. You cannot execute a
+        // LocalPool executor from within another LocalPool executor.
         //
-        // It is maybe anti-futures to spawn a thread just for
-        // this, but I see no better way at present. Patches
-        // are welcome here.
+        // We recommend the use of the "runtime" crate to power user
+        // applications. It provides a more full-featured runtime,
+        // anyway.
         let tncref = self.tnc.clone();
-        thread::spawn(move || {
-            executor::block_on(async move {
-                let mut tnc = tncref.lock().await;
-                let _ = tnc.disconnect().await;
-            })
-        })
-        .join()
-        .expect("Unable to join disconnect thread");
+        executor::block_on(async move {
+            let mut tnc = tncref.lock().await;
+            let _ = tnc.disconnect().await;
+        });
 
         // Mark as fully disconnected
         self.state.shutdown_read();

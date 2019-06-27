@@ -6,10 +6,6 @@ use std::io;
 use std::string::String;
 
 use futures::channel::mpsc::{SendError, TrySendError};
-use futures::prelude::*;
-
-use async_timer::timed::Expired;
-use async_timer::Oneshot;
 
 use crate::protocol::response::CommandResult;
 
@@ -56,7 +52,11 @@ impl From<CommandResult> for TncError {
 
 impl From<io::Error> for TncError {
     fn from(e: io::Error) -> Self {
-        TncError::IoError(e)
+        match e.kind() {
+            // these errors might come from a runtime timeout
+            io::ErrorKind::TimedOut => TncError::CommandTimeout,
+            _ => TncError::IoError(e),
+        }
     }
 }
 
@@ -69,16 +69,6 @@ impl From<SendError> for TncError {
 impl<T> From<TrySendError<T>> for TncError {
     fn from(_e: TrySendError<T>) -> Self {
         TncError::IoError(connection_reset_err())
-    }
-}
-
-impl<F, T> From<Expired<F, T>> for TncError
-where
-    F: Future + Unpin,
-    T: Oneshot,
-{
-    fn from(_e: Expired<F, T>) -> Self {
-        TncError::CommandTimeout
     }
 }
 

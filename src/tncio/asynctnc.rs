@@ -20,9 +20,8 @@ use futures::sink::{Sink, SinkExt};
 use futures::stream::{Stream, StreamExt};
 use futures::task::{Context, Poll};
 
-use async_timer::Timed;
-
 use runtime::net::TcpStream;
+use runtime::time::FutureExt;
 
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
@@ -529,7 +528,7 @@ where
             let res = if timeout == Duration::from_secs(0) {
                 self.data_stream.next().await
             } else {
-                Timed::platform_new(self.data_stream.next(), timeout.clone()).await?
+                self.data_stream.next().timeout(timeout.clone()).await?
             };
             match res {
                 None => return Err(TncError::IoError(connection_reset_err())),
@@ -561,9 +560,9 @@ where
     debug!("Sending TNC command: {}", &send_raw);
 
     // send
-    let _ = Timed::platform_new(outp.send(send_raw), timeout.clone()).await?;
+    let _ = outp.send(send_raw).timeout(timeout.clone()).await?;
 
-    match Timed::platform_new(inp.next(), timeout.clone()).await? {
+    match inp.next().timeout(timeout.clone()).await? {
         // lost connection
         None => Err(TncError::IoError(connection_reset_err())),
         // TNC FAULT means our command has failed
@@ -676,15 +675,14 @@ mod test {
     use std::io::Cursor;
 
     use futures::channel::mpsc;
-    use futures::executor;
     use futures::sink;
     use futures::stream;
     use futures::task;
 
     use crate::protocol::constants::CommandID;
 
-    #[test]
-    fn test_execute_command_good_response() {
+    #[runtime::test]
+    async fn test_execute_command_good_response() {
         let cmd_out = command::listen(true);
         let res_in: Vec<CommandResult> = vec![Ok((CommandID::LISTEN, None))];
 
@@ -692,20 +690,16 @@ mod test {
         let mut stream_in = stream::iter(res_in.into_iter());
         let timeout = Duration::from_secs(10);
 
-        let res = executor::block_on(execute_command(
-            &mut sink_out,
-            &mut stream_in,
-            &timeout,
-            cmd_out,
-        ));
+        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
+
         match res {
             Ok((CommandID::LISTEN, None)) => assert!(true),
             _ => assert!(false),
         }
     }
 
-    #[test]
-    fn test_execute_command_bad_response() {
+    #[runtime::test]
+    async fn test_execute_command_bad_response() {
         let cmd_out = command::listen(true);
         let res_in: Vec<CommandResult> = vec![Ok((CommandID::VERSION, None))];
 
@@ -713,20 +707,15 @@ mod test {
         let mut stream_in = stream::iter(res_in.into_iter());
         let timeout = Duration::from_secs(10);
 
-        let res = executor::block_on(execute_command(
-            &mut sink_out,
-            &mut stream_in,
-            &timeout,
-            cmd_out,
-        ));
+        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
             Err(TncError::CommandResponseInvalid) => assert!(true),
             _ => assert!(false),
         }
     }
 
-    #[test]
-    fn test_execute_command_eof() {
+    #[runtime::test]
+    async fn test_execute_command_eof() {
         let cmd_out = command::listen(true);
         let res_in: Vec<CommandResult> = vec![];
 
@@ -734,40 +723,30 @@ mod test {
         let mut stream_in = stream::iter(res_in.into_iter());
         let timeout = Duration::from_secs(10);
 
-        let res = executor::block_on(execute_command(
-            &mut sink_out,
-            &mut stream_in,
-            &timeout,
-            cmd_out,
-        ));
+        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
             Err(TncError::IoError(e)) => assert_eq!(e.kind(), io::ErrorKind::ConnectionReset),
             _ => assert!(false),
         }
     }
 
-    #[test]
-    fn test_execute_command_timeout() {
+    #[runtime::test]
+    async fn test_execute_command_timeout() {
         let cmd_out = command::listen(true);
 
         let mut sink_out = sink::drain();
         let mut stream_in = stream::once(futures::future::empty());
-        let timeout = Duration::from_nanos(1);
+        let timeout = Duration::from_micros(2);
 
-        let res = executor::block_on(execute_command(
-            &mut sink_out,
-            &mut stream_in,
-            &timeout,
-            cmd_out,
-        ));
+        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
             Err(TncError::CommandTimeout) => assert!(true),
             _ => assert!(false),
         }
     }
 
-    #[test]
-    fn test_streams() {
+    #[runtime::test]
+    async fn test_streams() {
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
         let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
 
@@ -790,8 +769,8 @@ mod test {
         });
     }
 
-    #[test]
-    fn test_execute_disconnect() {
+    #[runtime::test]
+    async fn test_execute_disconnect() {
         let mut cx = Context::from_waker(task::noop_waker_ref());
 
         let (mut ctrl_out_snd, mut ctrl_out_rx) = mpsc::unbounded();

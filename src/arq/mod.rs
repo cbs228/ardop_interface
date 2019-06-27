@@ -116,6 +116,14 @@
 //! The `ArqStream` has methods for retrieving each of these byte
 //! counts. There is also a method for retrieving the count of
 //! received bytes.
+//!
+//! # Panics
+//!
+//! Using the disconnect-on-Drop behavior will panic if the async
+//! runtime is the `LocalPool` from the `futures` crate. We
+//! recommend the use of the `runtime` crate instead. Alternatively,
+//! ensure to close the connection before letting the `ArqStream`
+//! drop.
 
 mod arqstream;
 mod connectioninfo;
