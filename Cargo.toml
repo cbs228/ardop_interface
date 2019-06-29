@@ -1,6 +1,6 @@
 [package]
 name = "ardop_interface"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 authors = ["Colin S <3526918+cbs228@users.noreply.github.com>"]
 edition = "2018"
 description = "Interface to the Amateur Radio Digital Open Protocol (ARDOP)"
