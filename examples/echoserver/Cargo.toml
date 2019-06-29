@@ -1,0 +1,16 @@
+[package]
+name = "echoserver"
+version = "0.1.0"
+authors = ["Colin S <3526918+cbs228@users.noreply.github.com>"]
+edition = "2018"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ardop_interface = {path = "../.."}
+bytes = "^0.4.12"
+clap = "^2.33"
+futures-preview = "^0.3.0-alpha"
+log = "^0.4.6"
+runtime = "^0.3.0-alpha"
+stderrlog = "^0.4.1"
