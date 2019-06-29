@@ -2,7 +2,9 @@
 
 An Async Rust interface to the ARDOP TNC
 
-[Documentation](https://docs.rs/ardop_interface)
+[Documentation](https://docs.rs/ardop_interface) |
+[Crate](https://crates.io/crates/ardop_interface) |
+[Git](https://github.com/cbs228/ardop_interface)
 
 ## Introduction
 
@@ -114,15 +116,17 @@ rustup toolchain install nightly
 rustup default nightly
 ```
 
-Next, obtain the ARDOP software. This crate has been tested
-against John Wiseman's `ardopc` version 1, and these instructions
-assume its use. You may be able to obtain this software at
-<http://www.cantab.net/users/john.wiseman/Downloads/Beta/TeensyProjects.zip>.
+Next, obtain a compatible implementation of ARDOP. You must use
+ARDOP software which implements protocol **version one**.
+The ARDOP v2 specification has been withdrawn by its authors, and
+version three is presently in development. The TNC interface on
+which this crate depends can change during major releases.
 
-Regardless of your choice of implementations, you must use a modem
-which implements ARDOP protocol **version one**. Version two of the ARDOP
-protocol has been withdrawn by its authors. Version three is presently
-in development, and its interface protocol may be different.
+These instructions assume the use of John Wiseman's `ardopc`, version 1.
+Other implementations will probably work, but this crate has not
+been tested against them. You may be able to obtain this software at
+<http://www.cantab.net/users/john.wiseman/Downloads/Beta/TeensyProjects.zip>
+or from the ARDOP [forums](https://ardop.groups.io/g/users/topics).
 
 You will need your system's C/C++ compiler in order to build `ardopc`.
 Debian-based distributions can install these with:
@@ -183,17 +187,17 @@ Start two instances of ardopc
 Build and run the `echoserver` package with
 
 ```bash
-cargo run --package echoserver -- localhost:8515 N0CALL-S 200
+cargo run --package echoserver -- localhost:8515 MYCALL-S 200
 ```
 
-Replace `N0CALL` with your callsign. The `-S` is a
+Replace `MYCALL` with your callsign. The `-S` is a
 Service Set Identifier (SSID), which is an arbitrary
 single-character extension to your callsign.
 
 Now run the `echoclient` with
 
 ```bash
-cargo run --package echoclient -- localhost:8520 N0CALL-C N0CALL-S 200
+cargo run --package echoclient -- localhost:8520 MYCALL-C MYCALL-S 200
 ```
 
 The `echoclient` will send a number of pre-programmed
