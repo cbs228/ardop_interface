@@ -276,7 +276,6 @@ extern crate regex;
 extern crate runtime;
 
 pub mod arq;
-pub mod framer;
 pub mod tnc;
 
 mod framing;

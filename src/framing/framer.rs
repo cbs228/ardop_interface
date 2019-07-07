@@ -116,6 +116,7 @@ where
     /// The high water-mark does not impose a hard upper bound
     /// on the length of either buffer, but it does impose a
     /// soft upper bound.
+    #[allow(dead_code)]
     pub fn send_high_water_mark(&self) -> usize {
         self.send_high_water_mark
     }
@@ -133,6 +134,7 @@ where
     ///
     /// # Parameters
     /// - `hwm`: New send high-water mark
+    #[allow(dead_code)]
     pub fn set_send_high_water_mark(&mut self, hwm: usize) {
         self.send_high_water_mark = hwm;
     }
@@ -140,6 +142,7 @@ where
     /// Release the I/O and the codec
     ///
     /// Destroys this `FramedRead` and returns its components
+    #[allow(dead_code)]
     pub fn release(self) -> (I, C) {
         (self.io, self.codec)
     }

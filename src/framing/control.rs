@@ -5,7 +5,7 @@ use std::string::String;
 
 use bytes::BytesMut;
 
-use crate::framer::{Decoder, Encoder};
+use super::framer::{Decoder, Encoder};
 
 use crate::protocol::response::Response;
 
@@ -57,7 +57,7 @@ mod test {
     use futures::executor;
     use futures::prelude::*;
 
-    use crate::framer::Framed;
+    use super::super::framer::Framed;
     use crate::protocol::response::{Event, Response};
 
     #[test]
