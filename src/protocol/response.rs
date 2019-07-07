@@ -83,6 +83,13 @@ pub enum ConnectionStateChange {
     /// Data is information about the connection
     Connected(ConnectionInfo),
 
+    /// Ping ACK received
+    ///
+    /// Data fields are:
+    /// 0. SNR, in dB relative to 3 kHz
+    /// 1. Constellation quality (unitless, higher→better)
+    PingAck(u16, u16),
+
     /// Failed to connect
     ///
     /// No connection was ever successfully made with

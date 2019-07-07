@@ -13,7 +13,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::string::String;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::sink::{Sink, SinkExt};
@@ -35,7 +35,7 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
-use crate::tnc::{TncError, TncResult};
+use crate::tnc::{PingAck, TncError, TncResult};
 
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
@@ -48,6 +48,9 @@ const DEFAULT_TIMEOUT_EVENT: Duration = Duration::from_secs(90);
 
 // Timeout for async disconnect
 const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
+
+// Ping timeout, per ping sent
+const TIMEOUT_PING: Duration = Duration::from_secs(5);
 
 /// Asynchronous ARDOP TNC
 ///
@@ -267,6 +270,65 @@ where
                 Err(e)
             }
         }
+    }
+
+    /// Ping a remote `target` peer
+    ///
+    /// When run, this future will
+    ///
+    /// 1. Wait for a clear channel
+    /// 2. Send an outgoing `PING` request
+    /// 3. Wait for a reply or for the ping timeout to elapse
+    ///
+    /// # Parameters
+    /// - `target`: Peer callsign, with optional `-SSID` portion
+    /// - `attempts`: Number of ping packets to send before
+    ///   giving up
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// If no reply was received, returns `None`. Otherwise, returns
+    /// a ping response which contains SNR and decode quality.
+    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    where
+        S: Into<String>,
+    {
+        if attempts <= 0 {
+            return Ok(None);
+        }
+
+        // Send the ping
+        let target_string = target.into();
+        info!("Pinging {} ({} attempts)...", &target_string, attempts);
+        self.command(command::ping(target_string.clone(), attempts))
+            .await?;
+
+        // The ping will expire at timeout_seconds in the future
+        let timeout_seconds = attempts as u64 * TIMEOUT_PING.as_secs();
+        let start = Instant::now();
+
+        loop {
+            match self.next_state_change_timeout(TIMEOUT_PING.clone()).await {
+                Err(TncError::CommandTimeout) => { /* ignore */ }
+                Ok(ConnectionStateChange::PingAck(snr, quality)) => {
+                    let ack = PingAck::new(target_string, snr, quality);
+                    info!("{}", &ack);
+                    return Ok(Some(ack));
+                }
+                Err(e) => return Err(e),
+                _ => { /* ignore */ }
+            }
+
+            if start.elapsed().as_secs() >= timeout_seconds {
+                // ping timeout
+                break;
+            }
+        }
+
+        info!("Ping {}: ping timeout", &target_string);
+        Ok(None)
     }
 
     /// Dial a remote `target` peer
