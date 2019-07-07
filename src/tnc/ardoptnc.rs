@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::lock::Mutex;
 
-use super::TncResult;
+use super::{PingAck, TncResult};
 
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
@@ -60,6 +60,33 @@ impl ArdopTnc {
     /// The formally assigned callsign for this station.
     pub fn mycall(&self) -> &String {
         &self.mycall
+    }
+
+    /// Ping a remote `target` peer
+    ///
+    /// When run, this future will
+    ///
+    /// 1. Wait for a clear channel
+    /// 2. Send an outgoing `PING` request
+    /// 3. Wait for a reply or for the ping timeout to elapse
+    ///
+    /// # Parameters
+    /// - `target`: Peer callsign, with optional `-SSID` portion
+    /// - `attempts`: Number of ping packets to send before
+    ///   giving up
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// If no reply was received, returns `None`. Otherwise, returns
+    /// a ping response which contains SNR and decode quality.
+    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    where
+        S: Into<String>,
+    {
+        let mut tnc = self.inner.lock().await;
+        tnc.ping(target, attempts).await
     }
 
     /// Dial a remote `target` peer
