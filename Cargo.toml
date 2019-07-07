@@ -18,7 +18,7 @@ log = "^0.4.6"
 nom = "^4.2.3"
 num = "^0.2.0"
 bytes = "^0.4.12"
-futures-preview = ">=0.3.0-alpha.16"
+futures-preview = "=0.3.0-alpha.17"
 runtime = ">=0.3.0-alpha.6"
 
 [workspace]

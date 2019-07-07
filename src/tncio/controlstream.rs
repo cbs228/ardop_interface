@@ -213,23 +213,20 @@ impl<I> Sink<String> for ControlSink<I>
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
-    type SinkError = io::Error;
+    type Error = io::Error;
 
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // we are ready if the outgoing I/O is ready
         let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
         Pin::new(&mut state.io).poll_ready(cx)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: String) -> Result<(), Self::SinkError> {
+    fn start_send(mut self: Pin<&mut Self>, item: String) -> Result<(), Self::Error> {
         // accept into internal buffer
         Ok((*self).outqueue.push_back(item))
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         let this = &mut (*self);
         let state_mutex = &mut this.state;
         let outqueue = &mut this.outqueue;
@@ -245,7 +242,7 @@ where
         Pin::new(&mut state.io).poll_flush(cx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         let mut state = ready!(Pin::new(&mut (*self).state.lock()).poll(cx));
         Pin::new(&mut state.io).poll_close(cx)
     }

@@ -230,7 +230,7 @@ where
     /// Stream + Sink reference
     pub fn data_stream_sink(
         &mut self,
-    ) -> &mut (impl Stream<Item = DataEvent> + Sink<DataOut, SinkError = io::Error> + Unpin) {
+    ) -> &mut (impl Stream<Item = DataEvent> + Sink<DataOut, Error = io::Error> + Unpin) {
         &mut self.data_stream
     }
 
@@ -604,7 +604,7 @@ fn execute_disconnect<K, S, E, Z>(
     evt_in: &mut E,
 ) -> Poll<TncResult<()>>
 where
-    K: Sink<String, SinkError = Z> + Unpin,
+    K: Sink<String, Error = Z> + Unpin,
     S: Stream<Item = CommandResult> + Unpin,
     E: Stream<Item = DataEvent> + Unpin,
     crate::tnc::TncError: std::convert::From<Z>,
@@ -735,7 +735,7 @@ mod test {
         let cmd_out = command::listen(true);
 
         let mut sink_out = sink::drain();
-        let mut stream_in = stream::once(futures::future::empty());
+        let mut stream_in = stream::once(futures::future::pending());
         let timeout = Duration::from_micros(2);
 
         let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
