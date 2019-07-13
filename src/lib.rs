@@ -275,8 +275,11 @@ extern crate bytes;
 #[macro_use]
 extern crate futures;
 #[macro_use]
+extern crate lazy_static;
+#[macro_use]
 extern crate log;
 extern crate num;
+extern crate regex;
 extern crate runtime;
 
 pub mod arq;
