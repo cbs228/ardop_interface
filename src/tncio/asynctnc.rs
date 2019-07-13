@@ -25,7 +25,7 @@ use runtime::time::FutureExt;
 
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
-use super::data::DataOut;
+use super::data::{DataIn, DataOut};
 use super::dataevent::{DataEvent, DataEventStream};
 
 use crate::arq::{ConnectionFailedReason, ConnectionInfo};
@@ -557,6 +557,9 @@ where
             match res {
                 None => return Err(TncError::IoError(connection_reset_err())),
                 Some(DataEvent::Event(event)) => return Ok(event),
+                Some(DataEvent::Data(DataIn::IDF(peer_call, peer_grid))) => {
+                    return Ok(ConnectionStateChange::IdentityFrame(peer_call, peer_grid))
+                }
                 Some(_data) => { /* consume it */ }
             }
         }
@@ -788,13 +791,18 @@ mod test {
     #[runtime::test]
     async fn test_streams() {
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
-        let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
+        let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
 
         futures::executor::block_on(async {
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(_d)) => assert!(true),
+                _ => assert!(false),
+            }
+
+            match tnc.data_stream_sink().next().await {
+                Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
                 _ => assert!(false),
             }
 

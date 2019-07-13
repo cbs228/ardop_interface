@@ -83,7 +83,29 @@ pub enum ConnectionStateChange {
     /// Data is information about the connection
     Connected(ConnectionInfo),
 
+    /// Identity frame received
+    ///
+    /// Reports the receipt of an identity frame (`IDF`) from
+    /// a remote peer. Tuple contains:
+    /// 0. Peer callsign
+    /// 1. Peer Maidenhead grid square, if known
+    IdentityFrame(String, Option<String>),
+
+    /// Ping frame received
+    ///
+    /// Reports the receipt of an incoming `PING` request
+    /// from a remote peer. The `PING` is not necessarily
+    /// directed at your station. Tuple contains:
+    /// 0. Sender callsign
+    /// 1. Target callsign
+    /// 2. SNR, in dB relative to 3 kHz
+    /// 3. Constellation quality (unitless, higher→better)
+    Ping(String, String, u16, u16),
+
     /// Ping ACK received
+    ///
+    /// A remote peer has responded to a `PING` request made
+    /// by this station.
     ///
     /// Data fields are:
     /// 0. SNR, in dB relative to 3 kHz
