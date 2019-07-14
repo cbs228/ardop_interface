@@ -15,13 +15,25 @@ pub enum TncError {
     /// TNC rejected a command with a `FAULT` message
     CommandFailed(String),
 
-    /// The TNC sent a response that does not belong to our command
-    CommandResponseInvalid,
-
-    /// TNC failed to respond in a timely manner
-    CommandTimeout,
+    /// Event timed out
+    ///
+    /// This error indicates that an expected TNC event did
+    /// not occur within the allotted time. The operation
+    /// should probably be retried.
+    TimedOut,
 
     /// Socket connectivity problem
+    ///
+    /// These errors are generally fatal and indicate serious,
+    /// uncorrectable problems with the local ARDOP TNC
+    /// connection.
+    ///
+    /// - `io::ErrorKind::ConnectionReset`: lost connection
+    ///    to TNC
+    /// - `io::ErrorKind::TimedOut`: TNC did not respond to
+    ///    a command
+    /// - `io::ErrorKind::InvalidData`: TNC sent a malformed
+    ///    or unsolicited command response
     IoError(io::Error),
 }
 
@@ -32,10 +44,7 @@ impl fmt::Display for TncError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             TncError::CommandFailed(s) => write!(f, "TNC command failed: \"{}\"", s),
-            TncError::CommandResponseInvalid => {
-                write!(f, "TNC sent an unsolicited or invalid command response",)
-            }
-            TncError::CommandTimeout => write!(f, "TNC command timed out"),
+            TncError::TimedOut => write!(f, "Timed out"),
             TncError::IoError(e) => write!(f, "IO Error: {}", e),
         }
     }
@@ -54,7 +63,7 @@ impl From<io::Error> for TncError {
     fn from(e: io::Error) -> Self {
         match e.kind() {
             // these errors might come from a runtime timeout
-            io::ErrorKind::TimedOut => TncError::CommandTimeout,
+            io::ErrorKind::TimedOut => TncError::TimedOut,
             _ => TncError::IoError(e),
         }
     }

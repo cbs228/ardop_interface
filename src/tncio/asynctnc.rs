@@ -43,9 +43,6 @@ const DATA_PORT_OFFSET: u16 = 1;
 // Default timeout for local TNC commands
 const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(20000);
 
-// Default timeout for TNC event resolution, such as connect
-const DEFAULT_TIMEOUT_EVENT: Duration = Duration::from_secs(90);
-
 // Timeout for async disconnect
 const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
 
@@ -65,7 +62,6 @@ where
     control_in_res: ControlStreamResults<I>,
     control_out: ControlSink<I>,
     control_timeout: Duration,
-    event_timeout: Duration,
     disconnect_progress: DisconnectProgress,
 }
 
@@ -151,7 +147,6 @@ where
             control_in_res,
             control_out,
             control_timeout: DEFAULT_TIMEOUT_COMMAND,
-            event_timeout: DEFAULT_TIMEOUT_EVENT,
             disconnect_progress: DisconnectProgress::NoProgress,
         }
     }
@@ -170,9 +165,9 @@ where
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If a command times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
+    /// Command timeouts cause an `TncError::IoError`
+    /// of type `io::ErrorKind::TimedOut`. This error
+    /// indicates that the socket connection is likely dead.
     ///
     /// # Returns
     /// Current timeout value
@@ -186,38 +181,14 @@ where
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
+    /// Command timeouts cause an `TncError::IoError`
+    /// of type `io::ErrorKind::TimedOut`. This error
+    /// indicates that the socket connection is likely dead.
+    ///
     /// # Parameters
     /// - `timeout`: New command timeout value
     pub fn set_control_timeout(&mut self, timeout: Duration) {
         self.control_timeout = timeout;
-    }
-
-    /// Gets the event timeout value
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If an event times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
-    ///
-    /// # Returns
-    /// Current timeout value
-    pub fn event_timeout(&self) -> &Duration {
-        &self.event_timeout
-    }
-
-    /// Sets timeout for the control connection
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// # Parameters
-    /// - `timeout`: New event timeout value
-    pub fn set_event_timeout(&mut self, timeout: Duration) {
-        self.event_timeout = timeout;
     }
 
     /// Events and data stream, for both incoming and outgoing data
@@ -311,7 +282,7 @@ where
 
         loop {
             match self.next_state_change_timeout(TIMEOUT_PING.clone()).await {
-                Err(TncError::CommandTimeout) => { /* ignore */ }
+                Err(TncError::TimedOut) => { /* ignore */ }
                 Ok(ConnectionStateChange::PingAck(snr, quality)) => {
                     let ack = PingAck::new(target_string, snr, quality);
                     info!("{}", &ack);
@@ -452,26 +423,21 @@ where
 
         // wait until we connect
         loop {
-            match self.next_state_change_timeout(Duration::from_secs(0)).await {
-                Err(_timeout) => break,
-                Ok(ConnectionStateChange::Connected(info)) => {
+            match self.next_state_change().await? {
+                ConnectionStateChange::Connected(info) => {
                     info!("CONNECTED {}", &info);
                     self.command(command::listen(false)).await?;
                     return Ok(Ok(info));
                 }
-                Ok(ConnectionStateChange::Failed(fail)) => {
+                ConnectionStateChange::Failed(fail) => {
                     info!("Incoming connection failed: {}", fail);
                 }
-                Ok(ConnectionStateChange::Closed) => {
+                ConnectionStateChange::Closed => {
                     info!("Incoming connection failed: not connected");
                 }
                 _ => continue,
             }
         }
-
-        // timed out
-        self.command(command::listen(false)).await?;
-        Ok(Err(ConnectionFailedReason::NoAnswer))
     }
 
     /// Disconnect any in-progress ARQ connection
@@ -577,8 +543,7 @@ where
 
     // wait for a connection state change
     async fn next_state_change(&mut self) -> TncResult<ConnectionStateChange> {
-        self.next_state_change_timeout(self.event_timeout.clone())
-            .await
+        self.next_state_change_timeout(Duration::from_secs(0)).await
     }
 
     // wait for a connection state change (specified timeout, zero for infinite)
@@ -624,18 +589,20 @@ where
     // send
     let _ = outp.send(send_raw).timeout(timeout.clone()).await?;
 
-    match inp.next().timeout(timeout.clone()).await? {
+    match inp.next().timeout(timeout.clone()).await {
+        // timeout elapsed
+        Err(_timeout) => Err(TncError::IoError(connection_timeout_err())),
         // lost connection
-        None => Err(TncError::IoError(connection_reset_err())),
+        Ok(None) => Err(TncError::IoError(connection_reset_err())),
         // TNC FAULT means our command has failed
-        Some(Err(badcmd)) => Err(TncError::CommandFailed(badcmd)),
-        Some(Ok((in_id, msg))) => {
+        Ok(Some(Err(badcmd))) => Err(TncError::CommandFailed(badcmd)),
+        Ok(Some(Ok((in_id, msg)))) => {
             if in_id == *cmd.command_id() {
                 // success
                 Ok((in_id, msg))
             } else {
                 // success, but this isn't the command we are looking for
-                Err(TncError::CommandResponseInvalid)
+                Err(TncError::IoError(command_response_invalid_err()))
             }
         }
     }
@@ -730,6 +697,20 @@ fn connection_reset_err() -> io::Error {
     )
 }
 
+fn connection_timeout_err() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "Lost connection to ARDOP TNC: command timed out",
+    )
+}
+
+fn command_response_invalid_err() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "TNC sent an unsolicited or invalid command response",
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -771,7 +752,7 @@ mod test {
 
         let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
-            Err(TncError::CommandResponseInvalid) => assert!(true),
+            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::InvalidData, e.kind()),
             _ => assert!(false),
         }
     }
@@ -802,7 +783,7 @@ mod test {
 
         let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
-            Err(TncError::CommandTimeout) => assert!(true),
+            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::TimedOut, e.kind()),
             _ => assert!(false),
         }
     }

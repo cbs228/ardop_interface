@@ -329,9 +329,10 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If a command times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
     ///
     /// # Returns
     /// Current timeout value
@@ -345,40 +346,16 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
+    ///
     /// # Parameters
     /// - `timeout`: New command timeout value
     pub async fn set_control_timeout(&mut self, timeout: Duration) {
         let mut tnc = self.inner.lock().await;
         tnc.set_control_timeout(timeout)
-    }
-
-    /// Gets the event timeout value
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If an event times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
-    ///
-    /// # Returns
-    /// Current timeout value
-    pub async fn event_timeout(&self) -> Duration {
-        self.inner.lock().await.event_timeout().clone()
-    }
-
-    /// Sets timeout for events
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// # Parameters
-    /// - `timeout`: New event timeout value
-    pub async fn set_event_timeout(&mut self, timeout: Duration) {
-        let mut tnc = self.inner.lock().await;
-        tnc.set_event_timeout(timeout)
     }
 
     // Send a command to the TNC and await the response
