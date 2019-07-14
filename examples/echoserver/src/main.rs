@@ -91,8 +91,7 @@ async fn main() {
         let connection = tnc
             .listen(arq_bandwidth, false)
             .await
-            .expect("TNC failure during listen")
-            .expect("Unexpected failure to listen.");
+            .expect("TNC failure during listen");
 
         // Wrap the I/O connection object in a framer
         // which extracts every line of text. Binary streams

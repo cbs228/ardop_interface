@@ -150,20 +150,49 @@ impl ArdopTnc {
     /// The outer result contains failures related to the local
     /// TNC connection.
     ///
-    /// The inner result contains failures related to the RF
-    /// connection. If the connection attempt succeeds, returns
-    /// a new `ArqStream` that can be used like an asynchronous
-    /// `TcpStream`.
-    pub async fn listen(
-        &mut self,
-        bw: u16,
-        bw_forced: bool,
-    ) -> TncResult<Result<ArqStream, ConnectionFailedReason>> {
+    /// This method will await forever for an inbound connection
+    /// to complete. Connections which fail during the setup phase
+    /// will not be reported to the application. Unless the local
+    /// TNC fails, this method will not fail.
+    ///
+    /// # Timeouts
+    /// This method will await forever, but one can wrap it in a
+    /// timeout with the `futures_timer` crate to make it expire
+    /// sooner.
+    ///
+    /// ```no_run
+    /// #![feature(async_await)]
+    /// use std::net::SocketAddr;
+    /// use std::time::Duration;
+    /// use futures::prelude::*;
+    /// use runtime::prelude::*;
+    /// use futures_timer::FutureExt;
+    ///
+    /// use ardop_interface::tnc::*;
+    ///
+    /// #[runtime::main]
+    /// async fn main() {
+    ///    let addr = "127.0.0.1:8515".parse().unwrap();
+    ///    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
+    ///        .await
+    ///        .unwrap();
+    ///    match tnc
+    ///        .listen(500, false)
+    ///        .timeout(Duration::from_secs(30))
+    ///        .await {
+    ///       Err(TncError::TimedOut) => { /* timed out */ },
+    ///       Err(e) => println!("Fatal TNC error: {}", e),
+    ///       Ok(conn) => println!("Connected: {}", conn)
+    ///    }
+    /// }
+    /// ```
+    ///
+    /// An expired timeout will return a
+    /// [`TncError::TimedOut`](enum.TncError.html#variant.TimedOut).
+    pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ArqStream> {
         let mut tnc = self.inner.lock().await;
-        match tnc.listen(bw, bw_forced).await? {
-            Ok(nfo) => Ok(Ok(ArqStream::new(self.inner.clone(), nfo))),
-            Err(e) => Ok(Err(e)),
-        }
+        let nfo = tnc.listen(bw, bw_forced).await?;
+        Ok(ArqStream::new(self.inner.clone(), nfo))
     }
 
     /// Send ID frame
@@ -329,9 +358,10 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If a command times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
     ///
     /// # Returns
     /// Current timeout value
@@ -345,40 +375,16 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
+    ///
     /// # Parameters
     /// - `timeout`: New command timeout value
     pub async fn set_control_timeout(&mut self, timeout: Duration) {
         let mut tnc = self.inner.lock().await;
         tnc.set_control_timeout(timeout)
-    }
-
-    /// Gets the event timeout value
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If an event times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
-    ///
-    /// # Returns
-    /// Current timeout value
-    pub async fn event_timeout(&self) -> Duration {
-        self.inner.lock().await.event_timeout().clone()
-    }
-
-    /// Sets timeout for events
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// # Parameters
-    /// - `timeout`: New event timeout value
-    pub async fn set_event_timeout(&mut self, timeout: Duration) {
-        let mut tnc = self.inner.lock().await;
-        tnc.set_event_timeout(timeout)
     }
 
     // Send a command to the TNC and await the response

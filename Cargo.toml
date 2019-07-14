@@ -19,6 +19,7 @@ nom = "^4.2.3"
 num = "^0.2.0"
 bytes = "^0.4.12"
 futures-preview = "=0.3.0-alpha.17"
+futures-timer = "0.2.1"
 runtime = ">=0.3.0-alpha.6"
 
 [workspace]
