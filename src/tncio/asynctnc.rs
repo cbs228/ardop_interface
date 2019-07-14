@@ -341,6 +341,7 @@ where
         let target_string = target.into();
 
         // configure the ARQ mode
+        self.command(command::listen(false)).await?;
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
         self.command(command::arqbw(bw, bw_forced)).await?;
@@ -405,14 +406,10 @@ where
     /// The outer result contains failures related to the local
     /// TNC connection.
     ///
-    /// The inner result contains failures related to the RF
-    /// connection. At present, these are all consumed internally,
-    /// but errors might be added in the future.
-    pub async fn listen(
-        &mut self,
-        bw: u16,
-        bw_forced: bool,
-    ) -> TncResult<Result<ConnectionInfo, ConnectionFailedReason>> {
+    /// This method will await forever for an inbound connection
+    /// to complete. Unless the local TNC fails, this method will
+    /// not fail.
+    pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ConnectionInfo> {
         // configure the ARQ mode and start listening
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
@@ -427,7 +424,7 @@ where
                 ConnectionStateChange::Connected(info) => {
                     info!("CONNECTED {}", &info);
                     self.command(command::listen(false)).await?;
-                    return Ok(Ok(info));
+                    return Ok(info);
                 }
                 ConnectionStateChange::Failed(fail) => {
                     info!("Incoming connection failed: {}", fail);
