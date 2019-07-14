@@ -35,7 +35,7 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
-use crate::tnc::{PingAck, TncError, TncResult};
+use crate::tnc::{DiscoveredPeer, PingAck, TncError, TncResult};
 
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
@@ -431,6 +431,49 @@ where
                 }
                 ConnectionStateChange::Closed => {
                     info!("Incoming connection failed: not connected");
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    /// Passively monitor for peers
+    ///
+    /// When run, the TNC will listen passively for peers which
+    /// announce themselves via:
+    ///
+    /// * ID Frames (`IDF`)
+    /// * Pings
+    ///
+    /// If such an announcement is heard, the future will return
+    /// a DiscoveredPeer.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for a peer broadcast. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+        // disable listening
+        self.command(command::protocolmode(ProtocolMode::ARQ))
+            .await?;
+        self.command(command::listen(true)).await?;
+
+        info!("Monitoring for available peers...");
+
+        // wait for peer transmission
+        loop {
+            match self.next_state_change().await? {
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(peer);
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(peer);
                 }
                 _ => continue,
             }

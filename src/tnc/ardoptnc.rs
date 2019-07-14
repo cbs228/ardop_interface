@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::lock::Mutex;
 
-use super::{PingAck, TncResult};
+use super::{DiscoveredPeer, PingAck, TncResult};
 
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
@@ -193,6 +193,31 @@ impl ArdopTnc {
         let mut tnc = self.inner.lock().await;
         let nfo = tnc.listen(bw, bw_forced).await?;
         Ok(ArqStream::new(self.inner.clone(), nfo))
+    }
+
+    /// Passively monitor for peers
+    ///
+    /// When run, the TNC will listen passively for peers which
+    /// announce themselves via:
+    ///
+    /// * ID Frames (`IDF`)
+    /// * Pings
+    ///
+    /// This method will await forever for a peer discovery.
+    /// See the [`listen()`](#method.listen) method for a method
+    /// for adding a timeout.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for a peer discovery. Unless
+    /// the local TNC fails, this method will not fail. If a peer
+    /// is discovered, a [`DiscoveredPeer`](struct.DiscoveredPeer.html)
+    /// is returned.
+    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+        let mut tnc = self.inner.lock().await;
+        tnc.monitor().await
     }
 
     /// Send ID frame
