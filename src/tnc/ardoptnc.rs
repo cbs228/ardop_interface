@@ -294,7 +294,9 @@ impl ArdopTnc {
     /// An empty if an ID frame was/will be sent, or some `TncError`
     /// if an ID frame will not be sent.
     pub async fn sendid(&mut self) -> TncResult<()> {
-        self.command(command::sendid()).await
+        self.command(command::sendid()).await?;
+        info!("Transmitting ID frame: {}", self.mycall);
+        Ok(())
     }
 
     /// Start a two-tone test
@@ -310,7 +312,9 @@ impl ArdopTnc {
     /// An empty if an two-tone test sequence be sent, or some
     /// `TncError` if the test cannot be performed.
     pub async fn twotonetest(&mut self) -> TncResult<()> {
-        self.command(command::twotonetest()).await
+        self.command(command::twotonetest()).await?;
+        info!("Transmitting two-tone test");
+        Ok(())
     }
 
     /// Set ARQ connection timeout
