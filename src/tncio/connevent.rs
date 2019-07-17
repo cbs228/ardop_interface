@@ -128,6 +128,9 @@ impl ConnEventParser {
                     None
                 }
             }
+            Event::PING(sender, target, snr, qual) => {
+                Some(ConnectionStateChange::Ping(sender, target, snr, qual))
+            }
             Event::PINGACK(snr, qual) => Some(ConnectionStateChange::PingAck(snr, qual)),
             Event::REJECTED(cfr) => Some(ConnectionStateChange::Failed(cfr)),
             Event::TARGET(tgtcall) => {

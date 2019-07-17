@@ -25,7 +25,7 @@ use runtime::time::FutureExt;
 
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
-use super::data::DataOut;
+use super::data::{DataIn, DataOut};
 use super::dataevent::{DataEvent, DataEventStream};
 
 use crate::arq::{ConnectionFailedReason, ConnectionInfo};
@@ -35,7 +35,7 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
-use crate::tnc::{PingAck, TncError, TncResult};
+use crate::tnc::{DiscoveredPeer, PingAck, TncError, TncResult};
 
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
@@ -48,6 +48,12 @@ const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
 
 // Ping timeout, per ping sent
 const TIMEOUT_PING: Duration = Duration::from_secs(5);
+
+/// The output of `listen_monitor()`
+pub enum ConnectionInfoOrPeerDiscovery {
+    Connection(ConnectionInfo),
+    PeerDiscovery(DiscoveredPeer),
+}
 
 /// Asynchronous ARDOP TNC
 ///
@@ -410,6 +416,85 @@ where
     /// to complete. Unless the local TNC fails, this method will
     /// not fail.
     pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ConnectionInfo> {
+        loop {
+            match self.listen_monitor(bw, bw_forced).await? {
+                ConnectionInfoOrPeerDiscovery::Connection(conn_info) => return Ok(conn_info),
+                _ => continue,
+            }
+        }
+    }
+
+    /// Passively monitor for peers
+    ///
+    /// When run, the TNC will listen passively for peers which
+    /// announce themselves via:
+    ///
+    /// * ID Frames (`IDF`)
+    /// * Pings
+    ///
+    /// If such an announcement is heard, the future will return
+    /// a DiscoveredPeer.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for a peer broadcast. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+        // disable listening
+        self.command(command::protocolmode(ProtocolMode::ARQ))
+            .await?;
+        self.command(command::listen(true)).await?;
+
+        info!("Monitoring for available peers...");
+
+        // wait for peer transmission
+        loop {
+            match self.next_state_change().await? {
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(peer);
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(peer);
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    /// Listen for incoming connections and peer identities
+    ///
+    /// When run, this future will wait for the TNC to accept
+    /// an incoming connection to `MYCALL` or one of `MYAUX`.
+    /// When a connection is accepted, the future will resolve
+    /// to a `ConnectionInfo`. This method will also listen for
+    /// beacons (ID frames) and pings and return information
+    /// about discovered peers.
+    ///
+    /// # Parameters
+    /// - `bw`: ARQ bandwidth to use
+    /// - `bw_forced`: If false, will potentially negotiate for a
+    ///   *lower* bandwidth than `bw` with the remote peer. If
+    ///   true, the connection will be made at `bw` rate---or not
+    ///   at all.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for an inbound connection
+    /// to complete or for a peer identity to be received. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn listen_monitor(
+        &mut self,
+        bw: u16,
+        bw_forced: bool,
+    ) -> TncResult<ConnectionInfoOrPeerDiscovery> {
         // configure the ARQ mode and start listening
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
@@ -424,10 +509,20 @@ where
                 ConnectionStateChange::Connected(info) => {
                     info!("CONNECTED {}", &info);
                     self.command(command::listen(false)).await?;
-                    return Ok(info);
+                    return Ok(ConnectionInfoOrPeerDiscovery::Connection(info));
                 }
                 ConnectionStateChange::Failed(fail) => {
                     info!("Incoming connection failed: {}", fail);
+                }
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
                 }
                 ConnectionStateChange::Closed => {
                     info!("Incoming connection failed: not connected");
@@ -557,6 +652,9 @@ where
             match res {
                 None => return Err(TncError::IoError(connection_reset_err())),
                 Some(DataEvent::Event(event)) => return Ok(event),
+                Some(DataEvent::Data(DataIn::IDF(peer_call, peer_grid))) => {
+                    return Ok(ConnectionStateChange::IdentityFrame(peer_call, peer_grid))
+                }
                 Some(_data) => { /* consume it */ }
             }
         }
@@ -788,13 +886,18 @@ mod test {
     #[runtime::test]
     async fn test_streams() {
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
-        let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
+        let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
 
         futures::executor::block_on(async {
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(_d)) => assert!(true),
+                _ => assert!(false),
+            }
+
+            match tnc.data_stream_sink().next().await {
+                Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
                 _ => assert!(false),
             }
 
