@@ -81,7 +81,7 @@ mod discoveredpeer;
 mod error;
 mod pingreply;
 
-pub use ardoptnc::ArdopTnc;
+pub use ardoptnc::{ArdopTnc, ListenMonitor};
 pub use discoveredpeer::DiscoveredPeer;
 pub use error::{TncError, TncResult};
 pub use pingreply::PingAck;

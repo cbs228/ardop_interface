@@ -49,6 +49,12 @@ const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
 // Ping timeout, per ping sent
 const TIMEOUT_PING: Duration = Duration::from_secs(5);
 
+/// The output of `listen_monitor()`
+pub enum ConnectionInfoOrPeerDiscovery {
+    Connection(ConnectionInfo),
+    PeerDiscovery(DiscoveredPeer),
+}
+
 /// Asynchronous ARDOP TNC
 ///
 /// This object communicates with the ARDOP program
@@ -410,28 +416,9 @@ where
     /// to complete. Unless the local TNC fails, this method will
     /// not fail.
     pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ConnectionInfo> {
-        // configure the ARQ mode and start listening
-        self.command(command::protocolmode(ProtocolMode::ARQ))
-            .await?;
-        self.command(command::arqbw(bw, bw_forced)).await?;
-        self.command(command::listen(true)).await?;
-
-        info!("Listening for {} at {} Hz...", self.mycall(), bw);
-
-        // wait until we connect
         loop {
-            match self.next_state_change().await? {
-                ConnectionStateChange::Connected(info) => {
-                    info!("CONNECTED {}", &info);
-                    self.command(command::listen(false)).await?;
-                    return Ok(info);
-                }
-                ConnectionStateChange::Failed(fail) => {
-                    info!("Incoming connection failed: {}", fail);
-                }
-                ConnectionStateChange::Closed => {
-                    info!("Incoming connection failed: not connected");
-                }
+            match self.listen_monitor(bw, bw_forced).await? {
+                ConnectionInfoOrPeerDiscovery::Connection(conn_info) => return Ok(conn_info),
                 _ => continue,
             }
         }
@@ -474,6 +461,71 @@ where
                     let peer = DiscoveredPeer::new(src, Some(snr), None);
                     info!("Ping: {}", peer);
                     return Ok(peer);
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    /// Listen for incoming connections and peer identities
+    ///
+    /// When run, this future will wait for the TNC to accept
+    /// an incoming connection to `MYCALL` or one of `MYAUX`.
+    /// When a connection is accepted, the future will resolve
+    /// to a `ConnectionInfo`. This method will also listen for
+    /// beacons (ID frames) and pings and return information
+    /// about discovered peers.
+    ///
+    /// # Parameters
+    /// - `bw`: ARQ bandwidth to use
+    /// - `bw_forced`: If false, will potentially negotiate for a
+    ///   *lower* bandwidth than `bw` with the remote peer. If
+    ///   true, the connection will be made at `bw` rate---or not
+    ///   at all.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for an inbound connection
+    /// to complete or for a peer identity to be received. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn listen_monitor(
+        &mut self,
+        bw: u16,
+        bw_forced: bool,
+    ) -> TncResult<ConnectionInfoOrPeerDiscovery> {
+        // configure the ARQ mode and start listening
+        self.command(command::protocolmode(ProtocolMode::ARQ))
+            .await?;
+        self.command(command::arqbw(bw, bw_forced)).await?;
+        self.command(command::listen(true)).await?;
+
+        info!("Listening for {} at {} Hz...", self.mycall(), bw);
+
+        // wait until we connect
+        loop {
+            match self.next_state_change().await? {
+                ConnectionStateChange::Connected(info) => {
+                    info!("CONNECTED {}", &info);
+                    self.command(command::listen(false)).await?;
+                    return Ok(ConnectionInfoOrPeerDiscovery::Connection(info));
+                }
+                ConnectionStateChange::Failed(fail) => {
+                    info!("Incoming connection failed: {}", fail);
+                }
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
+                }
+                ConnectionStateChange::Closed => {
+                    info!("Incoming connection failed: not connected");
                 }
                 _ => continue,
             }

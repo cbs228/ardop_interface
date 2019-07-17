@@ -14,7 +14,7 @@ use super::{DiscoveredPeer, PingAck, TncResult};
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::tncio::asynctnc::AsyncTncTcp;
+use crate::tncio::asynctnc::{AsyncTncTcp, ConnectionInfoOrPeerDiscovery};
 
 /// TNC Interface
 ///
@@ -23,6 +23,19 @@ use crate::tncio::asynctnc::AsyncTncTcp;
 pub struct ArdopTnc {
     inner: Arc<Mutex<AsyncTncTcp>>,
     mycall: String,
+}
+
+/// Result of [`ArdopTnc::listen_monitor()`](../tnc/struct.ArdopTnc.html#method.listen_monitor)
+///
+/// This value indicates either the
+/// * completion of an inbound ARQ connection; or
+/// * discovery of a remote peer, via its transmissions
+pub enum ListenMonitor {
+    /// ARQ Connection
+    Connection(ArqStream),
+
+    /// Heard callsign
+    PeerDiscovery(DiscoveredPeer),
 }
 
 impl ArdopTnc {
@@ -137,18 +150,18 @@ impl ArdopTnc {
     /// When run, this future will wait for the TNC to accept
     /// an incoming connection to `MYCALL` or one of `MYAUX`.
     /// When a connection is accepted, the future will resolve
-    /// to a `ConnectionInfo`.
+    /// to an [`ArqStream`](../arq/struct.ArqStream.html).
     ///
     /// # Parameters
-    /// - `bw`: ARQ bandwidth to use
+    /// - `bw`: Maximum ARQ bandwidth to use
     /// - `bw_forced`: If false, will potentially negotiate for a
     ///   *lower* bandwidth than `bw` with the remote peer. If
     ///   true, the connection will be made at `bw` rate---or not
     ///   at all.
     ///
     /// # Return
-    /// The outer result contains failures related to the local
-    /// TNC connection.
+    /// The result contains failures related to the local TNC
+    /// connection.
     ///
     /// This method will await forever for an inbound connection
     /// to complete. Connections which fail during the setup phase
@@ -195,7 +208,7 @@ impl ArdopTnc {
         Ok(ArqStream::new(self.inner.clone(), nfo))
     }
 
-    /// Passively monitor for peers
+    /// Passively monitor for band activity
     ///
     /// When run, the TNC will listen passively for peers which
     /// announce themselves via:
@@ -203,13 +216,16 @@ impl ArdopTnc {
     /// * ID Frames (`IDF`)
     /// * Pings
     ///
-    /// This method will await forever for a peer discovery.
-    /// See the [`listen()`](#method.listen) method for a method
-    /// for adding a timeout.
+    /// This method will await forever for a peer to be discovered
+    /// See the [`listen()`](#method.listen) method for a futures
+    /// extension which adds a timeout.
+    ///
+    /// The TNC has no memory of discovered stations and will
+    /// return a result every time it hears one.
     ///
     /// # Return
-    /// The outer result contains failures related to the local
-    /// TNC connection.
+    /// The result contains failures related to the local TNC
+    /// connection.
     ///
     /// This method will await forever for a peer discovery. Unless
     /// the local TNC fails, this method will not fail. If a peer
@@ -218,6 +234,52 @@ impl ArdopTnc {
     pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
         let mut tnc = self.inner.lock().await;
         tnc.monitor().await
+    }
+
+    /// Listen for incoming connections or for band activity
+    ///
+    /// This method combines [`listen()`](#method.listen) and
+    /// [`monitor()`](#method.monitor). The TNC will listen for
+    /// the next inbound ARQ connection OR for band activity and
+    /// return the first it finds.
+    ///
+    /// The incoming connection may be directed at either `MYCALL`
+    /// or any of `MYAUX`.
+    ///
+    /// Band activity will be reported from any available source.
+    /// At present, these sources are available:
+    ///
+    /// * ID Frames
+    /// * Ping requests
+    ///
+    /// # Parameters
+    /// - `bw`: Maximum ARQ bandwidth to use. Only applies to
+    ///   incoming connections—not peer discoveries.
+    /// - `bw_forced`: If false, will potentially negotiate for a
+    ///   *lower* bandwidth than `bw` with the remote peer. If
+    ///   true, the connection will be made at `bw` rate---or not
+    ///   at all.
+    ///
+    /// # Return
+    /// The result contains failures related to the local TNC
+    /// connection. The result will also error if this method is
+    /// wrapped in a `.timeout()` future, as per
+    /// [`listen()`](#method.listen).
+    ///
+    /// This method will await forever for an inbound connection
+    /// to complete. Connections which fail during the setup phase
+    /// will not be reported to the application. Unless the local
+    /// TNC fails, this method will not fail.
+    pub async fn listen_monitor(&mut self, bw: u16, bw_forced: bool) -> TncResult<ListenMonitor> {
+        let mut tnc = self.inner.lock().await;
+        match tnc.listen_monitor(bw, bw_forced).await? {
+            ConnectionInfoOrPeerDiscovery::Connection(nfo) => Ok(ListenMonitor::Connection(
+                ArqStream::new(self.inner.clone(), nfo),
+            )),
+            ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer) => {
+                Ok(ListenMonitor::PeerDiscovery(peer))
+            }
+        }
     }
 
     /// Send ID frame
