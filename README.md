@@ -232,8 +232,6 @@ by this crate.
 * **ID frames**: ID frames are not yet supported. At present,
   they are silently discarded.
 
-* **Pings**: Not yet supported.
-
 * **Busy channel detection**: This crate relies on the
   ARDOP TNC to perform busy channel detection. Support for
   this functionality varies across ARDOP implementations.

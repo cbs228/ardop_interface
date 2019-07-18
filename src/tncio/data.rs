@@ -3,7 +3,11 @@
 //! Represents payload data from either an unconnected FEC
 //! frame or an ARQ connection with a peer
 
+use std::str;
+use std::string::String;
+
 use bytes::Bytes;
+use regex::{Captures, Regex};
 
 use nom;
 use nom::*;
@@ -31,7 +35,11 @@ pub enum DataIn {
     ///
     /// ID frames are produced by the `SENDID` command and
     /// announce a remote station's callsign and grid.
-    IDF(Bytes),
+    /// Contains a tuple of
+    ///
+    /// 0. Peer callsign
+    /// 1. Peer grid, if given
+    IDF(String, Option<String>),
 }
 
 impl DataIn {
@@ -55,7 +63,7 @@ impl DataIn {
                 let out = match dtype {
                     "ARQ" => Some(DataIn::ARQ(Bytes::from(data))),
                     "FEC" => Some(DataIn::FEC(Bytes::from(data))),
-                    "IDF" => Some(DataIn::IDF(Bytes::from(data))),
+                    "IDF" => parse_id_frame(data),
                     _ => None,
                 };
                 (taken, out)
@@ -69,6 +77,34 @@ impl DataIn {
             }
         }
     }
+}
+
+// Read the contents of an ID Frame (IDF) and return
+// them if it is valid. ID frames sent by the local
+// TNC are ignored.
+fn parse_id_frame(inp: &[u8]) -> Option<DataIn> {
+    lazy_static! {
+        static ref RE: Regex =
+            Regex::new("^ID:\\s*([0-9A-Za-z-]+)(?:\\s+\\[(\\w{2,8})\\])?").unwrap();
+    }
+
+    let id_string = match str::from_utf8(inp) {
+        Ok(st) => st,
+        Err(_e) => return None,
+    };
+
+    let mtch: Captures = match RE.captures(id_string) {
+        Some(c) => c,
+        None => return None,
+    };
+
+    let peer_call = mtch.get(1).unwrap().as_str().to_owned();
+    let peer_grid = match mtch.get(2) {
+        Some(gr) => Some(gr.as_str().to_owned()),
+        None => None,
+    };
+
+    Some(DataIn::IDF(peer_call, peer_grid))
 }
 
 named!(
@@ -118,5 +154,27 @@ mod test {
         let res = DataIn::parse(data);
         assert_eq!(data.len(), res.0);
         assert!(res.1.is_none());
+    }
+
+    #[test]
+    fn test_parse_id_frame() {
+        let outgoing_id = b"W1AW:[EM00aa]";
+        let call_only = b"ID: W1AW";
+        let call_and_bad_grid = b"ID: W1AW [bad grid]:";
+        let call_and_grid = b"ID: W1AW-8 [EM00]:";
+
+        assert_eq!(None, parse_id_frame(outgoing_id));
+        assert_eq!(
+            DataIn::IDF("W1AW".to_owned(), None),
+            parse_id_frame(call_only).unwrap()
+        );
+        assert_eq!(
+            DataIn::IDF("W1AW".to_owned(), None),
+            parse_id_frame(call_and_bad_grid).unwrap()
+        );
+        assert_eq!(
+            DataIn::IDF("W1AW-8".to_owned(), Some("EM00".to_owned())),
+            parse_id_frame(call_and_grid).unwrap()
+        );
     }
 }

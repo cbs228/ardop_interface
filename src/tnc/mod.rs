@@ -4,6 +4,9 @@
 //!
 //! * [ArdopTnc](struct.ArdopTnc.html): The main interface
 //!   to ARDOP
+//! * [DiscoveredPeer](struct.DiscoveredPeer.html): A peer discovered
+//!   by monitoring
+//! * [PingAck](struct.PingAck.html): Responses to ping requests
 //! * [TncError](enum.TncError.html): Errors which occur
 //!   with the *local* ARDOP TNC, such as a broken TCP
 //!   connection
@@ -48,6 +51,7 @@
 //! * [`GRIDSQUARE`](struct.ArdopTnc.html#method.set_gridsquare)
 //! * [`LEADER`](struct.ArdopTnc.html#method.set_leader)
 //! * [`MYAUX`](struct.ArdopTnc.html#method.set_myaux)
+//! * [`PING`](struct.ArdopTnc.html#method.ping)
 //! * [`VERSION`](struct.ArdopTnc.html#method.version)
 //! * [`TWOTONETEST`](struct.ArdopTnc.html#method.twotonetest)
 //!
@@ -73,7 +77,11 @@
 //! it.
 
 mod ardoptnc;
+mod discoveredpeer;
 mod error;
+mod pingreply;
 
-pub use ardoptnc::ArdopTnc;
+pub use ardoptnc::{ArdopTnc, ListenMonitor};
+pub use discoveredpeer::DiscoveredPeer;
 pub use error::{TncError, TncResult};
+pub use pingreply::PingAck;

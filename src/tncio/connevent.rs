@@ -128,6 +128,10 @@ impl ConnEventParser {
                     None
                 }
             }
+            Event::PING(sender, target, snr, qual) => {
+                Some(ConnectionStateChange::Ping(sender, target, snr, qual))
+            }
+            Event::PINGACK(snr, qual) => Some(ConnectionStateChange::PingAck(snr, qual)),
             Event::REJECTED(cfr) => Some(ConnectionStateChange::Failed(cfr)),
             Event::TARGET(tgtcall) => {
                 self.last_target = Some(tgtcall);
@@ -234,5 +238,14 @@ mod test {
             evh.process(Event::BUFFER(0)).unwrap()
         );
         assert!(evh.process(Event::BUFFER(0)).is_none());
+    }
+
+    #[test]
+    fn test_ping_ack() {
+        let mut evh = ConnEventParser::new("W0EME");
+        assert_eq!(
+            ConnectionStateChange::PingAck(5, 20),
+            evh.process(Event::PINGACK(5, 20)).unwrap()
+        );
     }
 }

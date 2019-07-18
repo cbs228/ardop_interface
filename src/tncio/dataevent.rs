@@ -41,7 +41,7 @@ pub enum DataEvent {
 ///    to the TNC.
 pub struct DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, SinkError = io::Error> + Unpin,
+    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     data_inout: D,
@@ -53,7 +53,7 @@ where
 
 impl<D, E> DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, SinkError = io::Error> + Unpin,
+    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     /// Create new data event stream/sink
@@ -101,14 +101,14 @@ where
 
 impl<D, E> Unpin for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, SinkError = io::Error> + Unpin,
+    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
 }
 
 impl<D, E> Stream for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, SinkError = io::Error> + Unpin,
+    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     type Item = DataEvent;
@@ -165,28 +165,25 @@ where
 
 impl<D, E> Sink<DataOut> for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, SinkError = io::Error> + Unpin,
+    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
-    type SinkError = io::Error;
+    type Error = io::Error;
 
-    fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // we are always ready to receive
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: DataOut) -> Result<(), Self::SinkError> {
+    fn start_send(mut self: Pin<&mut Self>, item: DataOut) -> Result<(), Self::Error> {
         Pin::new(&mut (*self).data_inout).start_send(item)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut (*self).data_inout).poll_flush(cx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut (*self).data_inout).poll_close(cx)
     }
 }

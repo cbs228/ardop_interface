@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use futures::lock::Mutex;
 
-use super::TncResult;
+use super::{DiscoveredPeer, PingAck, TncResult};
 
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
 use crate::protocol::command::Command;
-use crate::tncio::asynctnc::AsyncTncTcp;
+use crate::tncio::asynctnc::{AsyncTncTcp, ConnectionInfoOrPeerDiscovery};
 
 /// TNC Interface
 ///
@@ -23,6 +23,19 @@ use crate::tncio::asynctnc::AsyncTncTcp;
 pub struct ArdopTnc {
     inner: Arc<Mutex<AsyncTncTcp>>,
     mycall: String,
+}
+
+/// Result of [`ArdopTnc::listen_monitor()`](../tnc/struct.ArdopTnc.html#method.listen_monitor)
+///
+/// This value indicates either the
+/// * completion of an inbound ARQ connection; or
+/// * discovery of a remote peer, via its transmissions
+pub enum ListenMonitor {
+    /// ARQ Connection
+    Connection(ArqStream),
+
+    /// Heard callsign
+    PeerDiscovery(DiscoveredPeer),
 }
 
 impl ArdopTnc {
@@ -62,13 +75,41 @@ impl ArdopTnc {
         &self.mycall
     }
 
+    /// Ping a remote `target` peer
+    ///
+    /// When run, this future will
+    ///
+    /// 1. Send an outgoing `PING` request
+    /// 2. Wait for a reply or for the ping timeout to elapse
+    /// 3. Complete with the ping result
+    ///
+    /// # Parameters
+    /// - `target`: Peer callsign, with optional `-SSID` portion
+    /// - `attempts`: Number of ping packets to send before
+    ///   giving up
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// If no reply was received, returns `None`. Otherwise, returns
+    /// a ping response which contains SNR and decode quality.
+    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    where
+        S: Into<String>,
+    {
+        let mut tnc = self.inner.lock().await;
+        tnc.ping(target, attempts).await
+    }
+
     /// Dial a remote `target` peer
     ///
     /// When run, this future will
     ///
-    /// 1. Wait for a clear channel
-    /// 2. Make an outgoing `ARQCALL` to the designated callsign
-    /// 3. Wait for a connection to either complete or fail
+    /// 1. Make an outgoing `ARQCALL` to the designated callsign
+    /// 2. Wait for a connection to either complete or fail
+    /// 3. Successful connections will return an
+    ///    [`ArqStream`](../arq/struct.ArqStream.html).
     ///
     /// # Parameters
     /// - `target`: Peer callsign, with optional `-SSID` portion
@@ -86,8 +127,8 @@ impl ArdopTnc {
     ///
     /// The inner result contains failures related to the RF
     /// connection. If the connection attempt succeeds, returns
-    /// a new `ArqStream` that can be used like an asynchronous
-    /// `TcpStream`.
+    /// a new [`ArqStream`](../arq/struct.ArqStream.html) that
+    /// can be used like an asynchronous `TcpStream`.
     pub async fn connect<S>(
         &mut self,
         target: S,
@@ -110,32 +151,135 @@ impl ArdopTnc {
     /// When run, this future will wait for the TNC to accept
     /// an incoming connection to `MYCALL` or one of `MYAUX`.
     /// When a connection is accepted, the future will resolve
-    /// to a `ConnectionInfo`.
+    /// to an [`ArqStream`](../arq/struct.ArqStream.html).
     ///
     /// # Parameters
-    /// - `bw`: ARQ bandwidth to use
+    /// - `bw`: Maximum ARQ bandwidth to use
     /// - `bw_forced`: If false, will potentially negotiate for a
     ///   *lower* bandwidth than `bw` with the remote peer. If
     ///   true, the connection will be made at `bw` rate---or not
     ///   at all.
     ///
     /// # Return
-    /// The outer result contains failures related to the local
-    /// TNC connection.
+    /// The result contains failures related to the local TNC
+    /// connection.
     ///
-    /// The inner result contains failures related to the RF
-    /// connection. If the connection attempt succeeds, returns
-    /// a new `ArqStream` that can be used like an asynchronous
-    /// `TcpStream`.
-    pub async fn listen(
-        &mut self,
-        bw: u16,
-        bw_forced: bool,
-    ) -> TncResult<Result<ArqStream, ConnectionFailedReason>> {
+    /// This method will await forever for an inbound connection
+    /// to complete. Connections which fail during the setup phase
+    /// will not be reported to the application. Unless the local
+    /// TNC fails, this method will not fail.
+    ///
+    /// # Timeouts
+    /// This method will await forever, but one can wrap it in a
+    /// timeout with the `futures_timer` crate to make it expire
+    /// sooner.
+    ///
+    /// ```no_run
+    /// #![feature(async_await)]
+    /// use std::net::SocketAddr;
+    /// use std::time::Duration;
+    /// use futures::prelude::*;
+    /// use runtime::prelude::*;
+    /// use futures_timer::FutureExt;
+    ///
+    /// use ardop_interface::tnc::*;
+    ///
+    /// #[runtime::main]
+    /// async fn main() {
+    ///    let addr = "127.0.0.1:8515".parse().unwrap();
+    ///    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
+    ///        .await
+    ///        .unwrap();
+    ///    match tnc
+    ///        .listen(500, false)
+    ///        .timeout(Duration::from_secs(30))
+    ///        .await {
+    ///       Err(TncError::TimedOut) => { /* timed out */ },
+    ///       Err(e) => println!("Fatal TNC error: {}", e),
+    ///       Ok(conn) => println!("Connected: {}", conn)
+    ///    }
+    /// }
+    /// ```
+    ///
+    /// An expired timeout will return a
+    /// [`TncError::TimedOut`](enum.TncError.html#variant.TimedOut).
+    pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ArqStream> {
         let mut tnc = self.inner.lock().await;
-        match tnc.listen(bw, bw_forced).await? {
-            Ok(nfo) => Ok(Ok(ArqStream::new(self.inner.clone(), nfo))),
-            Err(e) => Ok(Err(e)),
+        let nfo = tnc.listen(bw, bw_forced).await?;
+        Ok(ArqStream::new(self.inner.clone(), nfo))
+    }
+
+    /// Passively monitor for band activity
+    ///
+    /// When run, the TNC will listen passively for peers which
+    /// announce themselves via:
+    ///
+    /// * ID Frames (`IDF`)
+    /// * Pings
+    ///
+    /// This method will await forever for a peer to be discovered
+    /// See the [`listen()`](#method.listen) method for a futures
+    /// extension which adds a timeout.
+    ///
+    /// The TNC has no memory of discovered stations and will
+    /// return a result every time it hears one.
+    ///
+    /// # Return
+    /// The result contains failures related to the local TNC
+    /// connection.
+    ///
+    /// This method will await forever for a peer discovery. Unless
+    /// the local TNC fails, this method will not fail. If a peer
+    /// is discovered, a [`DiscoveredPeer`](struct.DiscoveredPeer.html)
+    /// is returned.
+    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+        let mut tnc = self.inner.lock().await;
+        tnc.monitor().await
+    }
+
+    /// Listen for incoming connections or for band activity
+    ///
+    /// This method combines [`listen()`](#method.listen) and
+    /// [`monitor()`](#method.monitor). The TNC will listen for
+    /// the next inbound ARQ connection OR for band activity and
+    /// return the first it finds.
+    ///
+    /// The incoming connection may be directed at either `MYCALL`
+    /// or any of `MYAUX`.
+    ///
+    /// Band activity will be reported from any available source.
+    /// At present, these sources are available:
+    ///
+    /// * ID Frames
+    /// * Ping requests
+    ///
+    /// # Parameters
+    /// - `bw`: Maximum ARQ bandwidth to use. Only applies to
+    ///   incoming connections—not peer discoveries.
+    /// - `bw_forced`: If false, will potentially negotiate for a
+    ///   *lower* bandwidth than `bw` with the remote peer. If
+    ///   true, the connection will be made at `bw` rate---or not
+    ///   at all.
+    ///
+    /// # Return
+    /// The result contains failures related to the local TNC
+    /// connection. The result will also error if this method is
+    /// wrapped in a `.timeout()` future, as per
+    /// [`listen()`](#method.listen).
+    ///
+    /// This method will await forever for an inbound connection
+    /// to complete. Connections which fail during the setup phase
+    /// will not be reported to the application. Unless the local
+    /// TNC fails, this method will not fail.
+    pub async fn listen_monitor(&mut self, bw: u16, bw_forced: bool) -> TncResult<ListenMonitor> {
+        let mut tnc = self.inner.lock().await;
+        match tnc.listen_monitor(bw, bw_forced).await? {
+            ConnectionInfoOrPeerDiscovery::Connection(nfo) => Ok(ListenMonitor::Connection(
+                ArqStream::new(self.inner.clone(), nfo),
+            )),
+            ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer) => {
+                Ok(ListenMonitor::PeerDiscovery(peer))
+            }
         }
     }
 
@@ -151,7 +295,9 @@ impl ArdopTnc {
     /// An empty if an ID frame was/will be sent, or some `TncError`
     /// if an ID frame will not be sent.
     pub async fn sendid(&mut self) -> TncResult<()> {
-        self.command(command::sendid()).await
+        self.command(command::sendid()).await?;
+        info!("Transmitting ID frame: {}", self.mycall);
+        Ok(())
     }
 
     /// Start a two-tone test
@@ -167,7 +313,9 @@ impl ArdopTnc {
     /// An empty if an two-tone test sequence be sent, or some
     /// `TncError` if the test cannot be performed.
     pub async fn twotonetest(&mut self) -> TncResult<()> {
-        self.command(command::twotonetest()).await
+        self.command(command::twotonetest()).await?;
+        info!("Transmitting two-tone test");
+        Ok(())
     }
 
     /// Set ARQ connection timeout
@@ -302,9 +450,10 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If a command times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
     ///
     /// # Returns
     /// Current timeout value
@@ -318,40 +467,16 @@ impl ArdopTnc {
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
+    /// Timeouts cause `TncError::IoError`s of kind
+    /// `io::ErrorKind::TimedOut`. Control timeouts
+    /// usually indicate a serious problem with the ARDOP
+    /// TNC or its connection.
+    ///
     /// # Parameters
     /// - `timeout`: New command timeout value
     pub async fn set_control_timeout(&mut self, timeout: Duration) {
         let mut tnc = self.inner.lock().await;
         tnc.set_control_timeout(timeout)
-    }
-
-    /// Gets the event timeout value
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If an event times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
-    ///
-    /// # Returns
-    /// Current timeout value
-    pub async fn event_timeout(&self) -> Duration {
-        self.inner.lock().await.event_timeout().clone()
-    }
-
-    /// Sets timeout for events
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// # Parameters
-    /// - `timeout`: New event timeout value
-    pub async fn set_event_timeout(&mut self, timeout: Duration) {
-        let mut tnc = self.inner.lock().await;
-        tnc.set_event_timeout(timeout)
     }
 
     // Send a command to the TNC and await the response

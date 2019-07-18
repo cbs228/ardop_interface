@@ -150,25 +150,22 @@ where
     I: AsyncRead + AsyncWrite + Unpin,
     C: Encoder + Decoder,
 {
-    type SinkError = io::Error;
+    type Error = io::Error;
 
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         while self.outbuf.len() > self.send_high_water_mark {
             ready!(Pin::new(&mut *self).poll_flush(cx))?;
         }
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: C::EncodeItem) -> Result<(), Self::SinkError> {
+    fn start_send(self: Pin<&mut Self>, item: C::EncodeItem) -> Result<(), Self::Error> {
         // encode the item
         let this = self.get_mut();
         this.codec.encode(item, &mut this.outbuf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         // transmit bytes to socket
         let this = self.get_mut();
 
@@ -189,7 +186,7 @@ where
         return Poll::Ready(Ok(()));
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         ready!(Pin::new(&mut *self).poll_flush(cx))?;
         Pin::new(&mut (*self).io).poll_close(cx)
     }

@@ -13,7 +13,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::string::String;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::sink::{Sink, SinkExt};
@@ -25,7 +25,7 @@ use runtime::time::FutureExt;
 
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
-use super::data::DataOut;
+use super::data::{DataIn, DataOut};
 use super::dataevent::{DataEvent, DataEventStream};
 
 use crate::arq::{ConnectionFailedReason, ConnectionInfo};
@@ -35,7 +35,7 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
-use crate::tnc::{TncError, TncResult};
+use crate::tnc::{DiscoveredPeer, PingAck, TncError, TncResult};
 
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
@@ -43,11 +43,17 @@ const DATA_PORT_OFFSET: u16 = 1;
 // Default timeout for local TNC commands
 const DEFAULT_TIMEOUT_COMMAND: Duration = Duration::from_millis(20000);
 
-// Default timeout for TNC event resolution, such as connect
-const DEFAULT_TIMEOUT_EVENT: Duration = Duration::from_secs(90);
-
 // Timeout for async disconnect
 const TIMEOUT_DISCONNECT: Duration = Duration::from_secs(60);
+
+// Ping timeout, per ping sent
+const TIMEOUT_PING: Duration = Duration::from_secs(5);
+
+/// The output of `listen_monitor()`
+pub enum ConnectionInfoOrPeerDiscovery {
+    Connection(ConnectionInfo),
+    PeerDiscovery(DiscoveredPeer),
+}
 
 /// Asynchronous ARDOP TNC
 ///
@@ -62,7 +68,6 @@ where
     control_in_res: ControlStreamResults<I>,
     control_out: ControlSink<I>,
     control_timeout: Duration,
-    event_timeout: Duration,
     disconnect_progress: DisconnectProgress,
 }
 
@@ -148,7 +153,6 @@ where
             control_in_res,
             control_out,
             control_timeout: DEFAULT_TIMEOUT_COMMAND,
-            event_timeout: DEFAULT_TIMEOUT_EVENT,
             disconnect_progress: DisconnectProgress::NoProgress,
         }
     }
@@ -167,9 +171,9 @@ where
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If a command times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
+    /// Command timeouts cause an `TncError::IoError`
+    /// of type `io::ErrorKind::TimedOut`. This error
+    /// indicates that the socket connection is likely dead.
     ///
     /// # Returns
     /// Current timeout value
@@ -183,38 +187,14 @@ where
     /// timeout if either the send or receive takes
     /// longer than `timeout`.
     ///
+    /// Command timeouts cause an `TncError::IoError`
+    /// of type `io::ErrorKind::TimedOut`. This error
+    /// indicates that the socket connection is likely dead.
+    ///
     /// # Parameters
     /// - `timeout`: New command timeout value
     pub fn set_control_timeout(&mut self, timeout: Duration) {
         self.control_timeout = timeout;
-    }
-
-    /// Gets the event timeout value
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// Timeouts cause `TncError::CommandTimeout` errors.
-    /// If an event times out, there is likely a serious
-    /// problem with the ARDOP TNC or its connection.
-    ///
-    /// # Returns
-    /// Current timeout value
-    pub fn event_timeout(&self) -> &Duration {
-        &self.event_timeout
-    }
-
-    /// Sets timeout for the control connection
-    ///
-    /// Limits the amount of time that the client is willing
-    /// to wait for a connection-related event, such as a
-    /// connection or disconnection.
-    ///
-    /// # Parameters
-    /// - `timeout`: New event timeout value
-    pub fn set_event_timeout(&mut self, timeout: Duration) {
-        self.event_timeout = timeout;
     }
 
     /// Events and data stream, for both incoming and outgoing data
@@ -230,7 +210,7 @@ where
     /// Stream + Sink reference
     pub fn data_stream_sink(
         &mut self,
-    ) -> &mut (impl Stream<Item = DataEvent> + Sink<DataOut, SinkError = io::Error> + Unpin) {
+    ) -> &mut (impl Stream<Item = DataEvent> + Sink<DataOut, Error = io::Error> + Unpin) {
         &mut self.data_stream
     }
 
@@ -267,6 +247,65 @@ where
                 Err(e)
             }
         }
+    }
+
+    /// Ping a remote `target` peer
+    ///
+    /// When run, this future will
+    ///
+    /// 1. Wait for a clear channel
+    /// 2. Send an outgoing `PING` request
+    /// 3. Wait for a reply or for the ping timeout to elapse
+    ///
+    /// # Parameters
+    /// - `target`: Peer callsign, with optional `-SSID` portion
+    /// - `attempts`: Number of ping packets to send before
+    ///   giving up
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// If no reply was received, returns `None`. Otherwise, returns
+    /// a ping response which contains SNR and decode quality.
+    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    where
+        S: Into<String>,
+    {
+        if attempts <= 0 {
+            return Ok(None);
+        }
+
+        // Send the ping
+        let target_string = target.into();
+        info!("Pinging {} ({} attempts)...", &target_string, attempts);
+        self.command(command::ping(target_string.clone(), attempts))
+            .await?;
+
+        // The ping will expire at timeout_seconds in the future
+        let timeout_seconds = attempts as u64 * TIMEOUT_PING.as_secs();
+        let start = Instant::now();
+
+        loop {
+            match self.next_state_change_timeout(TIMEOUT_PING.clone()).await {
+                Err(TncError::TimedOut) => { /* ignore */ }
+                Ok(ConnectionStateChange::PingAck(snr, quality)) => {
+                    let ack = PingAck::new(target_string, snr, quality);
+                    info!("{}", &ack);
+                    return Ok(Some(ack));
+                }
+                Err(e) => return Err(e),
+                _ => { /* ignore */ }
+            }
+
+            if start.elapsed().as_secs() >= timeout_seconds {
+                // ping timeout
+                break;
+            }
+        }
+
+        info!("Ping {}: ping timeout", &target_string);
+        Ok(None)
     }
 
     /// Dial a remote `target` peer
@@ -308,6 +347,7 @@ where
         let target_string = target.into();
 
         // configure the ARQ mode
+        self.command(command::listen(false)).await?;
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
         self.command(command::arqbw(bw, bw_forced)).await?;
@@ -372,14 +412,89 @@ where
     /// The outer result contains failures related to the local
     /// TNC connection.
     ///
-    /// The inner result contains failures related to the RF
-    /// connection. At present, these are all consumed internally,
-    /// but errors might be added in the future.
-    pub async fn listen(
+    /// This method will await forever for an inbound connection
+    /// to complete. Unless the local TNC fails, this method will
+    /// not fail.
+    pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ConnectionInfo> {
+        loop {
+            match self.listen_monitor(bw, bw_forced).await? {
+                ConnectionInfoOrPeerDiscovery::Connection(conn_info) => return Ok(conn_info),
+                _ => continue,
+            }
+        }
+    }
+
+    /// Passively monitor for peers
+    ///
+    /// When run, the TNC will listen passively for peers which
+    /// announce themselves via:
+    ///
+    /// * ID Frames (`IDF`)
+    /// * Pings
+    ///
+    /// If such an announcement is heard, the future will return
+    /// a DiscoveredPeer.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for a peer broadcast. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+        // disable listening
+        self.command(command::protocolmode(ProtocolMode::ARQ))
+            .await?;
+        self.command(command::listen(true)).await?;
+
+        info!("Monitoring for available peers...");
+
+        // wait for peer transmission
+        loop {
+            match self.next_state_change().await? {
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(peer);
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(peer);
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    /// Listen for incoming connections and peer identities
+    ///
+    /// When run, this future will wait for the TNC to accept
+    /// an incoming connection to `MYCALL` or one of `MYAUX`.
+    /// When a connection is accepted, the future will resolve
+    /// to a `ConnectionInfo`. This method will also listen for
+    /// beacons (ID frames) and pings and return information
+    /// about discovered peers.
+    ///
+    /// # Parameters
+    /// - `bw`: ARQ bandwidth to use
+    /// - `bw_forced`: If false, will potentially negotiate for a
+    ///   *lower* bandwidth than `bw` with the remote peer. If
+    ///   true, the connection will be made at `bw` rate---or not
+    ///   at all.
+    ///
+    /// # Return
+    /// The outer result contains failures related to the local
+    /// TNC connection.
+    ///
+    /// This method will await forever for an inbound connection
+    /// to complete or for a peer identity to be received. Unless
+    /// the local TNC fails, this method will not fail.
+    pub async fn listen_monitor(
         &mut self,
         bw: u16,
         bw_forced: bool,
-    ) -> TncResult<Result<ConnectionInfo, ConnectionFailedReason>> {
+    ) -> TncResult<ConnectionInfoOrPeerDiscovery> {
         // configure the ARQ mode and start listening
         self.command(command::protocolmode(ProtocolMode::ARQ))
             .await?;
@@ -390,26 +505,31 @@ where
 
         // wait until we connect
         loop {
-            match self.next_state_change_timeout(Duration::from_secs(0)).await {
-                Err(_timeout) => break,
-                Ok(ConnectionStateChange::Connected(info)) => {
+            match self.next_state_change().await? {
+                ConnectionStateChange::Connected(info) => {
                     info!("CONNECTED {}", &info);
                     self.command(command::listen(false)).await?;
-                    return Ok(Ok(info));
+                    return Ok(ConnectionInfoOrPeerDiscovery::Connection(info));
                 }
-                Ok(ConnectionStateChange::Failed(fail)) => {
+                ConnectionStateChange::Failed(fail) => {
                     info!("Incoming connection failed: {}", fail);
                 }
-                Ok(ConnectionStateChange::Closed) => {
+                ConnectionStateChange::IdentityFrame(call, grid) => {
+                    let peer = DiscoveredPeer::new(call, None, grid);
+                    info!("ID frame: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
+                }
+                ConnectionStateChange::Ping(src, _dst, snr, _quality) => {
+                    let peer = DiscoveredPeer::new(src, Some(snr), None);
+                    info!("Ping: {}", peer);
+                    return Ok(ConnectionInfoOrPeerDiscovery::PeerDiscovery(peer));
+                }
+                ConnectionStateChange::Closed => {
                     info!("Incoming connection failed: not connected");
                 }
                 _ => continue,
             }
         }
-
-        // timed out
-        self.command(command::listen(false)).await?;
-        Ok(Err(ConnectionFailedReason::NoAnswer))
     }
 
     /// Disconnect any in-progress ARQ connection
@@ -515,8 +635,7 @@ where
 
     // wait for a connection state change
     async fn next_state_change(&mut self) -> TncResult<ConnectionStateChange> {
-        self.next_state_change_timeout(self.event_timeout.clone())
-            .await
+        self.next_state_change_timeout(Duration::from_secs(0)).await
     }
 
     // wait for a connection state change (specified timeout, zero for infinite)
@@ -533,6 +652,9 @@ where
             match res {
                 None => return Err(TncError::IoError(connection_reset_err())),
                 Some(DataEvent::Event(event)) => return Ok(event),
+                Some(DataEvent::Data(DataIn::IDF(peer_call, peer_grid))) => {
+                    return Ok(ConnectionStateChange::IdentityFrame(peer_call, peer_grid))
+                }
                 Some(_data) => { /* consume it */ }
             }
         }
@@ -562,18 +684,20 @@ where
     // send
     let _ = outp.send(send_raw).timeout(timeout.clone()).await?;
 
-    match inp.next().timeout(timeout.clone()).await? {
+    match inp.next().timeout(timeout.clone()).await {
+        // timeout elapsed
+        Err(_timeout) => Err(TncError::IoError(connection_timeout_err())),
         // lost connection
-        None => Err(TncError::IoError(connection_reset_err())),
+        Ok(None) => Err(TncError::IoError(connection_reset_err())),
         // TNC FAULT means our command has failed
-        Some(Err(badcmd)) => Err(TncError::CommandFailed(badcmd)),
-        Some(Ok((in_id, msg))) => {
+        Ok(Some(Err(badcmd))) => Err(TncError::CommandFailed(badcmd)),
+        Ok(Some(Ok((in_id, msg)))) => {
             if in_id == *cmd.command_id() {
                 // success
                 Ok((in_id, msg))
             } else {
                 // success, but this isn't the command we are looking for
-                Err(TncError::CommandResponseInvalid)
+                Err(TncError::IoError(command_response_invalid_err()))
             }
         }
     }
@@ -604,7 +728,7 @@ fn execute_disconnect<K, S, E, Z>(
     evt_in: &mut E,
 ) -> Poll<TncResult<()>>
 where
-    K: Sink<String, SinkError = Z> + Unpin,
+    K: Sink<String, Error = Z> + Unpin,
     S: Stream<Item = CommandResult> + Unpin,
     E: Stream<Item = DataEvent> + Unpin,
     crate::tnc::TncError: std::convert::From<Z>,
@@ -668,6 +792,20 @@ fn connection_reset_err() -> io::Error {
     )
 }
 
+fn connection_timeout_err() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "Lost connection to ARDOP TNC: command timed out",
+    )
+}
+
+fn command_response_invalid_err() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "TNC sent an unsolicited or invalid command response",
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -709,7 +847,7 @@ mod test {
 
         let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
-            Err(TncError::CommandResponseInvalid) => assert!(true),
+            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::InvalidData, e.kind()),
             _ => assert!(false),
         }
     }
@@ -735,12 +873,12 @@ mod test {
         let cmd_out = command::listen(true);
 
         let mut sink_out = sink::drain();
-        let mut stream_in = stream::once(futures::future::empty());
+        let mut stream_in = stream::once(futures::future::pending());
         let timeout = Duration::from_micros(2);
 
         let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
         match res {
-            Err(TncError::CommandTimeout) => assert!(true),
+            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::TimedOut, e.kind()),
             _ => assert!(false),
         }
     }
@@ -748,13 +886,18 @@ mod test {
     #[runtime::test]
     async fn test_streams() {
         let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
-        let stream_data = Cursor::new(b"\x00\x08ARQHELLO".to_vec());
+        let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
 
         futures::executor::block_on(async {
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(_d)) => assert!(true),
+                _ => assert!(false),
+            }
+
+            match tnc.data_stream_sink().next().await {
+                Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
                 _ => assert!(false),
             }
 
