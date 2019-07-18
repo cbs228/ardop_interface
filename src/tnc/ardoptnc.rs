@@ -79,9 +79,9 @@ impl ArdopTnc {
     ///
     /// When run, this future will
     ///
-    /// 1. Wait for a clear channel
-    /// 2. Send an outgoing `PING` request
-    /// 3. Wait for a reply or for the ping timeout to elapse
+    /// 1. Send an outgoing `PING` request
+    /// 2. Wait for a reply or for the ping timeout to elapse
+    /// 3. Complete with the ping result
     ///
     /// # Parameters
     /// - `target`: Peer callsign, with optional `-SSID` portion
@@ -106,9 +106,10 @@ impl ArdopTnc {
     ///
     /// When run, this future will
     ///
-    /// 1. Wait for a clear channel
-    /// 2. Make an outgoing `ARQCALL` to the designated callsign
-    /// 3. Wait for a connection to either complete or fail
+    /// 1. Make an outgoing `ARQCALL` to the designated callsign
+    /// 2. Wait for a connection to either complete or fail
+    /// 3. Successful connections will return an
+    ///    [`ArqStream`](../arq/struct.ArqStream.html).
     ///
     /// # Parameters
     /// - `target`: Peer callsign, with optional `-SSID` portion
@@ -126,8 +127,8 @@ impl ArdopTnc {
     ///
     /// The inner result contains failures related to the RF
     /// connection. If the connection attempt succeeds, returns
-    /// a new `ArqStream` that can be used like an asynchronous
-    /// `TcpStream`.
+    /// a new [`ArqStream`](../arq/struct.ArqStream.html) that
+    /// can be used like an asynchronous `TcpStream`.
     pub async fn connect<S>(
         &mut self,
         target: S,
