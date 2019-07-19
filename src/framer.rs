@@ -169,6 +169,8 @@ where
         // transmit bytes to socket
         let this = self.get_mut();
 
+        ready!(Pin::new(&mut this.io).poll_flush(cx))?;
+
         while !this.outbuf.is_empty() {
             let num_written = ready!(Pin::new(&mut this.io).poll_write(cx, this.outbuf.as_ref()))?;
             let _ = this.outbuf.split_to(num_written);
@@ -180,6 +182,8 @@ where
                     "End of file",
                 )));
             }
+
+            ready!(Pin::new(&mut this.io).poll_flush(cx))?;
         }
 
         // nothing further to send
