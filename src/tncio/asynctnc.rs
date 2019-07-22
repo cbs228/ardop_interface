@@ -885,7 +885,7 @@ mod test {
 
     #[runtime::test]
     async fn test_streams() {
-        let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
+        let stream_ctrl = Cursor::new(b"BUSY FALSE\rINPUTPEAKS BLAH\rREJECTEDBW\r".to_vec());
         let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
@@ -898,6 +898,11 @@ mod test {
 
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
+                _ => assert!(false),
+            }
+
+            match tnc.data_stream_sink().next().await {
+                Some(DataEvent::Event(ConnectionStateChange::Busy(false))) => assert!(true),
                 _ => assert!(false),
             }
 

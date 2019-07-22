@@ -7,6 +7,7 @@
 
 use std::convert::Into;
 use std::string::String;
+use std::time::{Duration, Instant};
 
 use crate::arq::{CallDirection, ConnectionFailedReason, ConnectionInfo};
 use crate::protocol::response::{ConnectionStateChange, Event, State};
@@ -18,6 +19,7 @@ pub struct ConnEventParser {
     last_arq_state: State,
     is_connected: bool,
     buffer: u64,
+    clear_since: Option<Instant>,
 }
 
 impl ConnEventParser {
@@ -38,6 +40,7 @@ impl ConnEventParser {
             last_arq_state: State::DISC,
             is_connected: false,
             buffer: 0,
+            clear_since: Some(Instant::now()),
         }
     }
 
@@ -51,6 +54,7 @@ impl ConnEventParser {
         self.last_arq_state = State::DISC;
         self.is_connected = false;
         self.buffer = 0;
+        self.clear_since = Some(Instant::now());
     }
 
     /// Get this station's callsign
@@ -59,6 +63,34 @@ impl ConnEventParser {
     /// The formally assigned callsign for this station.
     pub fn mycall(&self) -> &String {
         return &self.mycall;
+    }
+
+    /// True if the RF channel is detected busy
+    ///
+    /// True if the busy detector has reported that the
+    /// RF channel is currently busy.
+    ///
+    /// The accuracy of this time stamp depends on the
+    /// `ConnEventParser` remaining up-to-date with TNC
+    /// events.
+    pub fn busy(&self) -> bool {
+        self.clear_since.is_none()
+    }
+
+    /// Time since the channel has been clear
+    ///
+    /// Returns the monotonic time which has elapsed since
+    /// the RF channel has become clear. If the channel is
+    /// currently busy, returns zero.
+    ///
+    /// The accuracy of this time stamp depends on the
+    /// `ConnEventParser` remaining up-to-date with TNC
+    /// events.
+    pub fn clear_time(&self) -> Duration {
+        match &self.clear_since {
+            None => Duration::from_micros(0),
+            Some(clear_at) => clear_at.elapsed(),
+        }
     }
 
     /// Process an event
@@ -84,6 +116,11 @@ impl ConnEventParser {
                 } else {
                     None
                 }
+            }
+            Event::BUSY(busy) => {
+                self.clear_since = if busy { None } else { Some(Instant::now()) };
+
+                Some(ConnectionStateChange::Busy(busy))
             }
             Event::CONNECTED(peer, bw, grid) => {
                 // connection established... which way?
@@ -247,5 +284,16 @@ mod test {
             ConnectionStateChange::PingAck(5, 20),
             evh.process(Event::PINGACK(5, 20)).unwrap()
         );
+    }
+
+    #[test]
+    fn test_busy() {
+        let mut evh = ConnEventParser::new("W0EME");
+        assert_eq!(false, evh.busy());
+
+        evh.process(Event::BUSY(true)).unwrap();
+        assert_eq!(true, evh.busy());
+        evh.process(Event::BUSY(false)).unwrap();
+        assert_eq!(false, evh.busy());
     }
 }
