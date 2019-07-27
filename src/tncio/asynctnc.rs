@@ -727,6 +727,7 @@ where
         self.command(command::protocolmode(ProtocolMode::FEC))
             .await?;
         self.command(command::mycall(self.mycall().clone())).await?;
+        self.command(command::busyblock(true)).await?;
         Ok(())
     }
 
