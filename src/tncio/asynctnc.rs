@@ -358,6 +358,10 @@ where
     /// - `target`: Peer callsign, with optional `-SSID` portion
     /// - `attempts`: Number of ping packets to send before
     ///   giving up
+    /// - `clear_time`: Minimum time channel must be clear. If zero,
+    ///   busy channel detection is disabled.
+    /// - `clear_max_wait`: Maximum time user is willing to wait for
+    ///   a clear channel.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -365,13 +369,22 @@ where
     ///
     /// If no reply was received, returns `None`. Otherwise, returns
     /// a ping response which contains SNR and decode quality.
-    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    pub async fn ping<S>(
+        &mut self,
+        target: S,
+        attempts: u16,
+        clear_time: Duration,
+        clear_max_wait: Duration,
+    ) -> TncResult<Option<PingAck>>
     where
         S: Into<String>,
     {
         if attempts <= 0 {
             return Ok(None);
         }
+
+        // Wait for clear channel
+        self.await_clear(clear_time, clear_max_wait).await?;
 
         // Send the ping
         let target_string = target.into();
@@ -422,6 +435,10 @@ where
     ///   at all.
     /// - `attempts`: Number of connection attempts to make
     ///   before giving up
+    /// - `clear_time`: Minimum time channel must be clear If zero,
+    ///   busy channel detection is disabled.
+    /// - `clear_max_wait`: Maximum time user is willing to wait for
+    ///   a clear channel.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -437,11 +454,20 @@ where
         bw: u16,
         bw_forced: bool,
         attempts: u16,
+        clear_time: Duration,
+        clear_max_wait: Duration,
     ) -> TncResult<Result<ConnectionInfo, ConnectionFailedReason>>
     where
         S: Into<String>,
     {
         let target_string = target.into();
+
+        // wait for clear channel
+        match self.await_clear(clear_time, clear_max_wait).await {
+            Ok(_clear) => { /* no-op*/ }
+            Err(TncError::TimedOut) => return Ok(Err(ConnectionFailedReason::Busy)),
+            Err(e) => return Err(e),
+        }
 
         // configure the ARQ mode
         self.command(command::listen(false)).await?;

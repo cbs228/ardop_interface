@@ -23,6 +23,8 @@ use crate::tncio::asynctnc::{AsyncTncTcp, ConnectionInfoOrPeerDiscovery};
 pub struct ArdopTnc {
     inner: Arc<Mutex<AsyncTncTcp>>,
     mycall: String,
+    clear_time: Duration,
+    clear_max_wait: Duration,
 }
 
 /// Result of [`ArdopTnc::listen_monitor()`](../tnc/struct.ArdopTnc.html#method.listen_monitor)
@@ -64,7 +66,12 @@ impl ArdopTnc {
 
         let tnc = AsyncTncTcp::new(addr, mycall2).await?;
         let inner = Arc::new(Mutex::new(tnc));
-        Ok(ArdopTnc { inner, mycall })
+        Ok(ArdopTnc {
+            inner,
+            mycall,
+            clear_time: DEFAULT_CLEAR_TIME,
+            clear_max_wait: DEFAULT_CLEAR_MAX_WAIT,
+        })
     }
 
     /// Get this station's callsign
@@ -75,13 +82,79 @@ impl ArdopTnc {
         &self.mycall
     }
 
+    /// Returns configured clear time
+    ///
+    /// The *clear time* is the duration that the RF channel must
+    /// be sensed as clear before an outgoing transmission will be
+    /// allowed to proceed.
+    ///
+    /// See [`set_clear_time()`](#method.set_clear_time).
+    pub fn clear_time(&self) -> &Duration {
+        &self.clear_time
+    }
+
+    /// Returns configured maximum clear waiting time
+    ///
+    /// Caps the maximum amount of time that a transmitting
+    /// Future, such as [`connect()`](#method.connect) or
+    /// [`ping()`](#method.ping), will spend waiting for the
+    /// channel to become clear.
+    ///
+    /// If the channel does not become clear within this
+    /// Duration, then a `TimedOut` error is raised.
+    ///
+    /// See [`set_clear_max_wait()`](#method.set_clear_max_wait).
+    pub fn clear_max_wait(&self) -> &Duration {
+        &self.clear_max_wait
+    }
+
+    /// Returns configured clear time
+    ///
+    /// The *clear time* is the duration that the RF channel must
+    /// be sensed as clear before an outgoing transmission will be
+    /// allowed to proceed.
+    ///
+    /// You should **ALWAYS** allow the busy-detection logic ample
+    /// time to declare that the channel is clear of any other
+    /// communications. The busy detector's sensitivity may be adjusted
+    /// via [`set_busydet()`](#method.set_busydet) if it is too sensitive
+    /// for your RF environment.
+    ///
+    /// If you need to send a *DISTRESS* or *EMERGENCY* signal, you may
+    /// set `tm` to zero to disable the busy-detection logic entirely.
+    ///
+    /// # Parameters
+    /// - `tm`: New clear time.
+    pub fn set_clear_time(&mut self, tm: Duration) {
+        self.clear_time = tm;
+    }
+
+    /// Returns configured maximum clear waiting time
+    ///
+    /// Caps the maximum amount of time that a transmitting
+    /// Future, such as [`connect()`](#method.connect) or
+    /// [`ping()`](#method.ping), will spend waiting for the
+    /// channel to become clear.
+    ///
+    /// If the channel does not become clear within this
+    /// Duration, then a `TimedOut` error is raised.
+    ///
+    /// # Parameters
+    /// - `tm`: New timeout for clear-channel waiting. `tm`
+    ///   must be at least the
+    ///   [`clear_time()`](#method.clear_time).
+    pub fn set_clear_max_wait(&mut self, tm: Duration) {
+        self.clear_max_wait = tm;
+    }
+
     /// Ping a remote `target` peer
     ///
     /// When run, this future will
     ///
-    /// 1. Send an outgoing `PING` request
-    /// 2. Wait for a reply or for the ping timeout to elapse
-    /// 3. Complete with the ping result
+    /// 1. Wait for a clear channel
+    /// 2. Send an outgoing `PING` request
+    /// 3. Wait for a reply or for the ping timeout to elapse
+    /// 4. Complete with the ping result
     ///
     /// # Parameters
     /// - `target`: Peer callsign, with optional `-SSID` portion
@@ -99,16 +172,23 @@ impl ArdopTnc {
         S: Into<String>,
     {
         let mut tnc = self.inner.lock().await;
-        tnc.ping(target, attempts).await
+        tnc.ping(
+            target,
+            attempts,
+            self.clear_time.clone(),
+            self.clear_max_wait.clone(),
+        )
+        .await
     }
 
     /// Dial a remote `target` peer
     ///
     /// When run, this future will
     ///
-    /// 1. Make an outgoing `ARQCALL` to the designated callsign
-    /// 2. Wait for a connection to either complete or fail
-    /// 3. Successful connections will return an
+    /// 1. Wait for a clear channel.
+    /// 2. Make an outgoing `ARQCALL` to the designated callsign
+    /// 3. Wait for a connection to either complete or fail
+    /// 4. Successful connections will return an
     ///    [`ArqStream`](../arq/struct.ArqStream.html).
     ///
     /// # Parameters
@@ -140,7 +220,17 @@ impl ArdopTnc {
         S: Into<String>,
     {
         let mut tnc = self.inner.lock().await;
-        match tnc.connect(target, bw, bw_forced, attempts).await? {
+        match tnc
+            .connect(
+                target,
+                bw,
+                bw_forced,
+                attempts,
+                self.clear_time.clone(),
+                self.clear_max_wait.clone(),
+            )
+            .await?
+        {
             Ok(nfo) => Ok(Ok(ArqStream::new(self.inner.clone(), nfo))),
             Err(e) => Ok(Err(e)),
         }
@@ -499,3 +589,6 @@ impl ArdopTnc {
         tnc.command(cmd).await
     }
 }
+
+const DEFAULT_CLEAR_TIME: Duration = Duration::from_secs(10);
+const DEFAULT_CLEAR_MAX_WAIT: Duration = Duration::from_secs(90);
