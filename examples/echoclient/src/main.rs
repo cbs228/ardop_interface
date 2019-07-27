@@ -11,6 +11,7 @@ extern crate stderrlog;
 use std::net::ToSocketAddrs;
 use std::process::exit;
 use std::str;
+use std::time::Duration;
 
 use clap::{App, Arg};
 use futures::prelude::*;
@@ -66,6 +67,12 @@ async fn main() {
                 .default_value("5")
                 .help("Number of connection attempts"),
         )
+        .arg(
+            Arg::with_name("clear-time")
+                .short("c")
+                .default_value("10")
+                .help("Minimum clear channel time, in seconds"),
+        )
         .get_matches();
 
     let tnc_address_str = matches.value_of("ADDRESS").unwrap();
@@ -74,6 +81,7 @@ async fn main() {
     let arq_bandwidth = value_t!(matches, "BW", u16).unwrap_or_else(|e| e.exit());
     let attempts = value_t!(matches, "attempts", u16).unwrap_or_else(|e| e.exit());
     let verbose = matches.occurrences_of("verbosity") as usize;
+    let clear_time_secs = value_t!(matches, "clear-time", u64).unwrap_or_else(|e| e.exit());
 
     stderrlog::new()
         .module(module_path!())
@@ -95,6 +103,10 @@ async fn main() {
     let mut tnc = ArdopTnc::new(&tnc_address, mycallstr)
         .await
         .expect("Unable to connect to ARDOP TNC");
+
+    // set the minimum clear channel time
+    // the channel must be clear for at least this long before we transmit
+    tnc.set_clear_time(Duration::from_secs(clear_time_secs));
 
     // set a more reasonable ARQ timeout
     tnc.set_arqtimeout(30).await.expect("Can't set ARQTIMEOUT.");
