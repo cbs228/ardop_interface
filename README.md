@@ -229,13 +229,6 @@ has a connectionless `FEC` protocol, which is UDP-like.
 The following other features are currently not implemented
 by this crate.
 
-* **ID frames**: ID frames are not yet supported. At present,
-  they are silently discarded.
-
-* **Busy channel detection**: This crate relies on the
-  ARDOP TNC to perform busy channel detection. Support for
-  this functionality varies across ARDOP implementations.
-
 * **Rig control**: No type of rig control is presently
   integrated. This crate cannot provide the following
   functionality, at present.

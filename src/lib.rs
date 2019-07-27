@@ -227,10 +227,6 @@
 //! The following other features are currently not implemented
 //! by this crate.
 //!
-//! * **Busy channel detection**: This crate relies on the
-//!   ARDOP TNC to perform busy channel detection. Support for
-//!   this functionality varies across ARDOP implementations.
-//!
 //! * **Rig control**: No type of rig control is presently
 //!   integrated. This crate cannot provide the following
 //!   functionality, at present.
