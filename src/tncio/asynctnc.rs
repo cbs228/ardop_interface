@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{Stream, StreamExt};
-use futures::task::{Context, Poll};
+use futures::task::{noop_waker_ref, Context, Poll};
 
 use runtime::net::TcpStream;
 use runtime::time::FutureExt;
@@ -249,6 +249,103 @@ where
         }
     }
 
+    /// Wait for a clear channel
+    ///
+    /// Waits for the RF channel to become clear, according
+    /// to the TNC's busy-channel detection logic. This method
+    /// will await for at most `max_wait` for the RF channel to
+    /// be clear for at least `clear_time`.
+    ///
+    /// # Parameters
+    /// - `clear_time`: Time that the channel must be clear. If
+    ///    zero, busy-detection logic is disabled.
+    /// - `max_wait`: Wait no longer than this time for a clear
+    ///   channel.
+    ///
+    /// # Returns
+    /// If `max_wait` elapses before the channel becomes clear,
+    /// returns `TncError::TimedOut`. If the channel has become
+    /// clear, and has remained clear for `clear_time`, then
+    /// returns `Ok`.
+    pub async fn await_clear(&mut self, clear_time: Duration, max_wait: Duration) -> TncResult<()> {
+        if clear_time == Duration::from_secs(0) {
+            warn!("Busy detector is DISABLED. Assuming channel is clear.");
+            return Ok(());
+        }
+
+        // Consume all events which are available, but don't
+        // actually wait.
+        let mut ctx = Context::from_waker(noop_waker_ref());
+        loop {
+            match Pin::new(&mut self.data_stream).poll_next(&mut ctx) {
+                Poll::Pending => break,
+                Poll::Ready(None) => return Err(connection_reset_err().into()),
+                Poll::Ready(Some(_evt)) => continue,
+            }
+        }
+
+        // Determine if we have been clear for long enough.
+        // If so, we're done.
+        if self.data_stream.state().clear_time() > clear_time {
+            info!("Channel is CLEAR and READY for use at +0.0 seconds");
+            return Ok(());
+        }
+
+        info!(
+            "Waiting for a clear channel: {:0.1} seconds within {:0.1} seconds...",
+            clear_time.as_millis() as f32 / 1000.0f32,
+            max_wait.as_millis() as f32 / 1000.0f32
+        );
+
+        // Until we time out...
+        let wait_start = Instant::now();
+        loop {
+            // how much longer can we wait?
+            let wait_elapsed = wait_start.elapsed();
+            if wait_elapsed >= max_wait {
+                info!("Timed out while waiting for clear channel.");
+                return Err(TncError::TimedOut);
+            }
+            let mut wait_remaining = max_wait - wait_elapsed;
+
+            // if we are clear, we only need to wait until our clear_time
+            if !self.data_stream.state().busy() {
+                let clear_elapsed = self.data_stream.state().clear_time();
+                if clear_elapsed >= clear_time {
+                    info!(
+                        "Channel is CLEAR and READY for use at +{:0.1} seconds",
+                        wait_elapsed.as_millis() as f32 / 1000.0f32
+                    );
+                    break;
+                }
+                let clear_remaining = clear_time - clear_elapsed;
+                wait_remaining = wait_remaining.min(clear_remaining)
+            }
+
+            // wait for next state transition
+            match self.next_state_change_timeout(wait_remaining).await {
+                Err(TncError::TimedOut) => continue,
+                Err(_e) => return Err(_e),
+                Ok(ConnectionStateChange::Busy(busy)) => {
+                    if busy {
+                        info!(
+                            "Channel is BUSY at +{:0.1} seconds",
+                            wait_start.elapsed().as_millis() as f32 / 1000.0f32
+                        );
+                    } else {
+                        info!(
+                            "Channel is CLEAR at +{:0.1} seconds",
+                            wait_start.elapsed().as_millis() as f32 / 1000.0f32
+                        );
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(())
+    }
+
     /// Ping a remote `target` peer
     ///
     /// When run, this future will
@@ -261,6 +358,10 @@ where
     /// - `target`: Peer callsign, with optional `-SSID` portion
     /// - `attempts`: Number of ping packets to send before
     ///   giving up
+    /// - `clear_time`: Minimum time channel must be clear. If zero,
+    ///   busy channel detection is disabled.
+    /// - `clear_max_wait`: Maximum time user is willing to wait for
+    ///   a clear channel.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -268,13 +369,22 @@ where
     ///
     /// If no reply was received, returns `None`. Otherwise, returns
     /// a ping response which contains SNR and decode quality.
-    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    pub async fn ping<S>(
+        &mut self,
+        target: S,
+        attempts: u16,
+        clear_time: Duration,
+        clear_max_wait: Duration,
+    ) -> TncResult<Option<PingAck>>
     where
         S: Into<String>,
     {
         if attempts <= 0 {
             return Ok(None);
         }
+
+        // Wait for clear channel
+        self.await_clear(clear_time, clear_max_wait).await?;
 
         // Send the ping
         let target_string = target.into();
@@ -325,6 +435,10 @@ where
     ///   at all.
     /// - `attempts`: Number of connection attempts to make
     ///   before giving up
+    /// - `clear_time`: Minimum time channel must be clear If zero,
+    ///   busy channel detection is disabled.
+    /// - `clear_max_wait`: Maximum time user is willing to wait for
+    ///   a clear channel.
     ///
     /// # Return
     /// The outer result contains failures related to the local
@@ -340,11 +454,20 @@ where
         bw: u16,
         bw_forced: bool,
         attempts: u16,
+        clear_time: Duration,
+        clear_max_wait: Duration,
     ) -> TncResult<Result<ConnectionInfo, ConnectionFailedReason>>
     where
         S: Into<String>,
     {
         let target_string = target.into();
+
+        // wait for clear channel
+        match self.await_clear(clear_time, clear_max_wait).await {
+            Ok(_clear) => { /* no-op*/ }
+            Err(TncError::TimedOut) => return Ok(Err(ConnectionFailedReason::Busy)),
+            Err(e) => return Err(e),
+        }
 
         // configure the ARQ mode
         self.command(command::listen(false)).await?;
@@ -630,6 +753,7 @@ where
         self.command(command::protocolmode(ProtocolMode::FEC))
             .await?;
         self.command(command::mycall(self.mycall().clone())).await?;
+        self.command(command::busyblock(true)).await?;
         Ok(())
     }
 
@@ -885,7 +1009,7 @@ mod test {
 
     #[runtime::test]
     async fn test_streams() {
-        let stream_ctrl = Cursor::new(b"BUSY FALSE\rREJECTEDBW\r".to_vec());
+        let stream_ctrl = Cursor::new(b"BUSY FALSE\rINPUTPEAKS BLAH\rREJECTEDBW\r".to_vec());
         let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
 
         let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
@@ -898,6 +1022,11 @@ mod test {
 
             match tnc.data_stream_sink().next().await {
                 Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
+                _ => assert!(false),
+            }
+
+            match tnc.data_stream_sink().next().await {
+                Some(DataEvent::Event(ConnectionStateChange::Busy(false))) => assert!(true),
                 _ => assert!(false),
             }
 

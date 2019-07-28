@@ -71,6 +71,13 @@ impl State {
 /// Announces a change in the ARQ connection state
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectionStateChange {
+    /// The busy detection state has changed
+    ///
+    /// If the payload is true, then the RF channel is now
+    /// sensed as busy. If the payload is false, then the RF
+    /// channel is now sensed as clear.
+    Busy(bool),
+
     /// An open connection has been closed
     ///
     /// Connections may be closed by `DISCONNECT` tear-down
