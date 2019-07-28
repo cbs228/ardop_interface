@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::lock::Mutex;
 
-use super::{DiscoveredPeer, PingAck, TncResult};
+use super::{DiscoveredPeer, PingAck, PingFailedReason, TncResult};
 
 use crate::arq::{ArqStream, ConnectionFailedReason};
 use crate::protocol::command;
@@ -165,9 +165,19 @@ impl ArdopTnc {
     /// The outer result contains failures related to the local
     /// TNC connection.
     ///
-    /// If no reply was received, returns `None`. Otherwise, returns
-    /// a ping response which contains SNR and decode quality.
-    pub async fn ping<S>(&mut self, target: S, attempts: u16) -> TncResult<Option<PingAck>>
+    /// The inner result is the success or failure of the round-trip
+    /// ping. If the ping succeeds, returns an `Ok(PingAck)`
+    /// with the response from the remote peer. If the ping fails,
+    /// returns `Err(PingFailedReason)`. Errors include:
+    ///
+    /// * `Busy`: The RF channel was busy during the ping attempt,
+    ///           and no ping was sent.
+    /// * `NoAnswer`: The remote peer did not answer.
+    pub async fn ping<S>(
+        &mut self,
+        target: S,
+        attempts: u16,
+    ) -> TncResult<Result<PingAck, PingFailedReason>>
     where
         S: Into<String>,
     {

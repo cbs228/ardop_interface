@@ -79,9 +79,9 @@
 mod ardoptnc;
 mod discoveredpeer;
 mod error;
-mod pingreply;
+mod ping;
 
 pub use ardoptnc::{ArdopTnc, ListenMonitor};
 pub use discoveredpeer::DiscoveredPeer;
 pub use error::{TncError, TncResult};
-pub use pingreply::PingAck;
+pub use ping::{PingAck, PingFailedReason};

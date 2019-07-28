@@ -35,7 +35,7 @@ use crate::protocol::command;
 use crate::protocol::command::Command;
 use crate::protocol::constants::{CommandID, ProtocolMode};
 use crate::protocol::response::{CommandOk, CommandResult, ConnectionStateChange};
-use crate::tnc::{DiscoveredPeer, PingAck, TncError, TncResult};
+use crate::tnc::{DiscoveredPeer, PingAck, PingFailedReason, TncError, TncResult};
 
 // Offset between control port and data port
 const DATA_PORT_OFFSET: u16 = 1;
@@ -367,24 +367,34 @@ where
     /// The outer result contains failures related to the local
     /// TNC connection.
     ///
-    /// If no reply was received, returns `None`. Otherwise, returns
-    /// a ping response which contains SNR and decode quality.
+    /// The inner result is the success or failure of the ping
+    /// operation. If the ping succeeds, returns an `Ok(PingAck)`
+    /// with the response from the remote peer. If the ping fails,
+    /// returns `Err(PingFailedReason)`. Errors include:
+    ///
+    /// * `Busy`: The RF channel was busy during the ping attempt,
+    ///           and no ping was sent.
+    /// * `NoAnswer`: The remote peer did not answer.
     pub async fn ping<S>(
         &mut self,
         target: S,
         attempts: u16,
         clear_time: Duration,
         clear_max_wait: Duration,
-    ) -> TncResult<Option<PingAck>>
+    ) -> TncResult<Result<PingAck, PingFailedReason>>
     where
         S: Into<String>,
     {
         if attempts <= 0 {
-            return Ok(None);
+            return Ok(Err(PingFailedReason::NoAnswer));
         }
 
         // Wait for clear channel
-        self.await_clear(clear_time, clear_max_wait).await?;
+        match self.await_clear(clear_time, clear_max_wait).await {
+            Ok(_ok) => {}
+            Err(TncError::TimedOut) => return Ok(Err(PingFailedReason::Busy)),
+            Err(e) => return Err(e),
+        }
 
         // Send the ping
         let target_string = target.into();
@@ -402,7 +412,7 @@ where
                 Ok(ConnectionStateChange::PingAck(snr, quality)) => {
                     let ack = PingAck::new(target_string, snr, quality);
                     info!("{}", &ack);
-                    return Ok(Some(ack));
+                    return Ok(Ok(ack));
                 }
                 Err(e) => return Err(e),
                 _ => { /* ignore */ }
@@ -415,7 +425,7 @@ where
         }
 
         info!("Ping {}: ping timeout", &target_string);
-        Ok(None)
+        Ok(Err(PingFailedReason::NoAnswer))
     }
 
     /// Dial a remote `target` peer

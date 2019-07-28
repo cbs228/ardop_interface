@@ -2,10 +2,22 @@ use std::convert::Into;
 use std::fmt;
 use std::string::String;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PingFailedReason {
+    /// RF channel is busy, and waiting period expired
+    ///
+    /// Nothing was transmitted.
+    Busy,
+
+    /// One or more pings was sent, but the peer did not answer
+    NoAnswer,
+}
+
 /// ARDOP Ping Response
 ///
 /// Indicates that a *solicited* ping reply has been
 /// received from a remote peer.
+#[derive(Debug, Clone)]
 pub struct PingAck {
     peer: String,
     snr: u16,
@@ -53,5 +65,14 @@ impl fmt::Display for PingAck {
             "Ping {}: SNR {} dB - Quality {}",
             &self.peer, self.snr, self.decode_quality
         )
+    }
+}
+
+impl fmt::Display for PingFailedReason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PingFailedReason::Busy => write!(f, "busy channel"),
+            PingFailedReason::NoAnswer => write!(f, "no answer from peer"),
+        }
     }
 }

@@ -10,6 +10,7 @@ extern crate stderrlog;
 
 use std::net::ToSocketAddrs;
 use std::process::exit;
+use std::time::Duration;
 
 use clap::{App, Arg};
 
@@ -50,6 +51,12 @@ async fn main() {
                 .multiple(true)
                 .help("Increase message verbosity"),
         )
+        .arg(
+            Arg::with_name("clear-time")
+                .short("c")
+                .default_value("10")
+                .help("Minimum clear channel time, in seconds"),
+        )
         .get_matches();
 
     let tnc_address_str = matches.value_of("ADDRESS").unwrap();
@@ -57,6 +64,7 @@ async fn main() {
     let targetcallstr = matches.value_of("TARGET").unwrap();
     let attempts = value_t!(matches, "attempts", u16).unwrap_or_else(|e| e.exit());
     let verbose = matches.occurrences_of("verbosity") as usize;
+    let clear_time_secs = value_t!(matches, "clear-time", u64).unwrap_or_else(|e| e.exit());
 
     stderrlog::new()
         .module(module_path!())
@@ -79,15 +87,19 @@ async fn main() {
         .await
         .expect("Unable to connect to ARDOP TNC");
 
+    // set the minimum clear channel time
+    // the channel must be clear for at least this long before we transmit
+    tnc.set_clear_time(Duration::from_secs(clear_time_secs));
+
     // perform the ping
     match tnc
         .ping(targetcallstr, attempts)
         .await
         .expect("TNC error while pinging")
     {
-        Some(_repl) => info!("Ping {}: succeed", targetcallstr),
-        None => {
-            error!("Ping {}: failed", targetcallstr);
+        Ok(_repl) => info!("Ping {}: succeed", targetcallstr),
+        Err(e) => {
+            error!("Ping {}: failed: {}", targetcallstr, e);
             exit(1);
         }
     }
