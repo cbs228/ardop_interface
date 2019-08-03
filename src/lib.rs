@@ -267,6 +267,7 @@ extern crate nom;
 extern crate bytes;
 #[macro_use]
 extern crate futures;
+extern crate futures_codec;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
