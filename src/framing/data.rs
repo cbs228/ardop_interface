@@ -48,7 +48,7 @@ impl Decoder for TncDataFraming {
         if src.len() < 5 {
             return Ok(None);
         }
-        let out = DataIn::parse(src.as_ref());
+        let out = DataIn::parse(src.as_ref())?;
         let _ = src.split_to(out.0);
         Ok(out.1)
     }
@@ -61,7 +61,6 @@ mod test {
     use std::io::Cursor;
 
     use bytes::{Buf, Bytes};
-    use futures::executor::ThreadPool;
     use futures::prelude::*;
     use futures_codec::Framed;
 
@@ -93,21 +92,18 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_decode() {
+    #[runtime::test]
+    async fn test_decode() {
         let words = b"\x00\x08ARQHELLO\x00\x08FECWORLDERR".to_vec();
         let curs = Cursor::new(words);
         let mut framer = Framed::new(curs, TncDataFraming::new());
-        let mut exec = ThreadPool::new().expect("Failed to create threadpool");
-        exec.run(async {
-            assert_eq!(
-                DataIn::ARQ(Bytes::from("HELLO")),
-                framer.next().await.unwrap().unwrap()
-            );
-            assert_eq!(
-                DataIn::FEC(Bytes::from("WORLD")),
-                framer.next().await.unwrap().unwrap()
-            );
-        });
+        assert_eq!(
+            DataIn::ARQ(Bytes::from("HELLO")),
+            framer.next().await.unwrap().unwrap()
+        );
+        assert_eq!(
+            DataIn::FEC(Bytes::from("WORLD")),
+            framer.next().await.unwrap().unwrap()
+        );
     }
 }
