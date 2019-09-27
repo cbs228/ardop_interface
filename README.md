@@ -177,6 +177,11 @@ pacmd set-default-sink Virtual1
 pacmd set-default-source Virtual1.monitor
 ```
 
+`ardopc` was designed for the ALSA sound APIs. Performance
+may be degraded when running with pulseaudio. On some systems,
+it may help to keep the pulseaudio volume control
+(`pavucontrol`) program open while ardopc is running.
+
 Start two instances of ardopc
 
 ```bash
