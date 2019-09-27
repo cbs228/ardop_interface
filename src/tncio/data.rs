@@ -3,6 +3,7 @@
 //! Represents payload data from either an unconnected FEC
 //! frame or an ARQ connection with a peer
 
+use std::io;
 use std::str;
 use std::string::String;
 
@@ -56,7 +57,7 @@ impl DataIn {
     /// Tuple of
     /// 0. Number of bytes from `buf` that were consumed
     /// 1. A single parsed `DataIn`, if one can be parsed.
-    pub fn parse(buf: &[u8]) -> (usize, Option<DataIn>) {
+    pub fn parse(buf: &[u8]) -> io::Result<(usize, Option<DataIn>)> {
         match parse_data(buf) {
             Ok((rem, (dtype, data))) => {
                 let taken = buf.len() - rem.len();
@@ -66,13 +67,16 @@ impl DataIn {
                     "IDF" => parse_id_frame(data),
                     _ => None,
                 };
-                (taken, out)
+                Ok((taken, out))
             }
             Err(e) => {
                 if e.is_incomplete() {
-                    (0, None)
+                    Ok((0, None))
                 } else {
-                    panic!("Unexpected data channel parse error: {:?}", e);
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Unexpected data channel parse error: {:?}", e),
+                    ))
                 }
             }
         }
@@ -127,31 +131,31 @@ mod test {
     #[test]
     fn test_parse() {
         let data = b"\x00\x08ARQHELLO";
-        let res = DataIn::parse(data);
+        let res = DataIn::parse(data).unwrap();
         assert_eq!(data.len(), res.0);
         assert_eq!(DataIn::ARQ(Bytes::from("HELLO")), res.1.unwrap());
 
         // err fields are eaten
         let data = b"\x00\x08ERRHELLO";
-        let res = DataIn::parse(data);
+        let res = DataIn::parse(data).unwrap();
         assert_eq!(data.len(), res.0);
         assert!(res.1.is_none());
 
         // not enough bytes
         let data = b"\x00\x08ARQHELL";
-        let res = DataIn::parse(data);
+        let res = DataIn::parse(data).unwrap();
         assert_eq!(0, res.0);
         assert!(res.1.is_none());
 
         // trailing field
         let data = b"\x00\x08ARQHELLO\x00\x08";
-        let res = DataIn::parse(data);
+        let res = DataIn::parse(data).unwrap();
         assert_eq!(data.len() - 2, res.0);
         assert_eq!(DataIn::ARQ(Bytes::from("HELLO")), res.1.unwrap());
 
         // unknown frame
         let data = b"\x00\x08ZZZHELLO";
-        let res = DataIn::parse(data);
+        let res = DataIn::parse(data).unwrap();
         assert_eq!(data.len(), res.0);
         assert!(res.1.is_none());
     }

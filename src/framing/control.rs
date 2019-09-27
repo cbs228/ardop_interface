@@ -1,11 +1,9 @@
 //! Framing for the TNC control protocol
 //!
-use std::io;
 use std::string::String;
 
 use bytes::BytesMut;
-
-use crate::framer::{Decoder, Encoder};
+use futures_codec::{Decoder, Encoder};
 
 use crate::protocol::response::Response;
 
@@ -20,18 +18,20 @@ impl TncControlFraming {
 }
 
 impl Encoder for TncControlFraming {
-    type EncodeItem = String;
+    type Item = String;
+    type Error = std::io::Error;
 
-    fn encode(&mut self, item: Self::EncodeItem, dst: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.extend_from_slice(item.as_bytes());
         Ok(())
     }
 }
 
 impl Decoder for TncControlFraming {
-    type DecodeItem = Response;
+    type Item = Response;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::DecodeItem>> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // parse the head of src
         let res = Response::parse(src.as_ref());
 
@@ -57,7 +57,8 @@ mod test {
     use futures::executor;
     use futures::prelude::*;
 
-    use crate::framer::Framed;
+    use futures_codec::Framed;
+
     use crate::protocol::response::{Event, Response};
 
     #[test]
@@ -68,10 +69,10 @@ mod test {
 
         executor::block_on(async {
             let e1 = framer.next().await;
-            assert_eq!(Response::Event(Event::PENDING), e1.unwrap());
+            assert_eq!(Response::Event(Event::PENDING), e1.unwrap().unwrap());
 
             let e2 = framer.next().await;
-            assert_eq!(Response::Event(Event::CANCELPENDING), e2.unwrap());
+            assert_eq!(Response::Event(Event::CANCELPENDING), e2.unwrap().unwrap());
 
             let e3 = framer.next().await;
             assert!(e3.is_none());

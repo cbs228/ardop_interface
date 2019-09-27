@@ -267,6 +267,7 @@ extern crate nom;
 extern crate bytes;
 #[macro_use]
 extern crate futures;
+extern crate futures_codec;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -276,7 +277,6 @@ extern crate regex;
 extern crate runtime;
 
 pub mod arq;
-pub mod framer;
 pub mod tnc;
 
 mod framing;

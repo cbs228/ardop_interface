@@ -17,8 +17,8 @@ use futures::lock::Mutex;
 use futures::prelude::*;
 use futures::task::Context;
 use futures::task::Poll;
+use futures_codec::Framed;
 
-use crate::framer::Framed;
 use crate::framing::control::TncControlFraming;
 use crate::protocol::response::{CommandResult, Event, Response};
 
@@ -187,24 +187,26 @@ where
         }
 
         match ready!(Pin::new(&mut (*self).io).poll_next(cx)) {
-            None => {
+            Some(Ok(Response::CommandResult(res))) => {
+                match (*self).dest_results.unbounded_send(res) {
+                    Ok(_ok) => Poll::Ready(Some(())),
+                    Err(_e) => {
+                        (*self).fused = true;
+                        Poll::Ready(None)
+                    }
+                }
+            }
+            Some(Ok(Response::Event(evt))) => match (*self).dest_events.unbounded_send(evt) {
+                Ok(_ok) => Poll::Ready(Some(())),
+                Err(_e) => {
+                    (*self).fused = true;
+                    Poll::Ready(None)
+                }
+            },
+            _ => {
                 (*self).fused = true;
                 Poll::Ready(None)
             }
-            Some(Response::CommandResult(res)) => match (*self).dest_results.unbounded_send(res) {
-                Ok(_ok) => Poll::Ready(Some(())),
-                Err(_e) => {
-                    (*self).fused = true;
-                    Poll::Ready(None)
-                }
-            },
-            Some(Response::Event(evt)) => match (*self).dest_events.unbounded_send(evt) {
-                Ok(_ok) => Poll::Ready(Some(())),
-                Err(_e) => {
-                    (*self).fused = true;
-                    Poll::Ready(None)
-                }
-            },
         }
     }
 }

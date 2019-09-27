@@ -82,8 +82,8 @@
 //!
 //! In most non-trivial applications, it is desirable to turn streams
 //! of bytes into higher-level *messages* for your application to
-//! consume. Messages are always read atomically, regardless of how
-//! many "overs" are required to deliver the data. Never rely on the
+//! consume. Messages must always be read atomically, regardless of how
+//! many "overs" are required to deliver the data. Never rely on
 //! receiving an entire message in one `read()`—that's not how
 //! streaming connections work.
 //!
@@ -93,11 +93,11 @@
 //! also encode "native Rust" types into their serialized, wireline
 //! representations.
 //!
-//! `ardop_interface` provides a simple
-//! [framer::Framed](../framer/struct.Framed.html) class for this
-//! purpose, but you can use any other design of your choice. An
-//! example of the `ardop_interface` framer in action can be found
-//! in the `echoserver` example.
+//! [`futures_codec`](https://docs.rs/futures_codec) provides a
+//! framework for building async framers. Use of this crate is
+//! demonstrated in the
+//! [`echoserver`](https://github.com/cbs228/ardop_interface/blob/master/examples/echoserver/src/main.rs)
+//! example. You can also write your own framers and codecs.
 //!
 //! # Monitoring Status of Transmissions
 //!

@@ -7,23 +7,20 @@ extern crate clap;
 extern crate futures;
 #[macro_use]
 extern crate log;
+extern crate futures_codec;
 extern crate futures_timer;
 extern crate stderrlog;
-
-mod newlineframer;
 
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
 use clap::{App, Arg};
 use futures::prelude::*;
+use futures_codec::{Framed, LinesCodec};
 use futures_timer::FutureExt;
 
 use ardop_interface::arq::ArqStream;
-use ardop_interface::framer::Framed;
 use ardop_interface::tnc::*;
-
-use newlineframer::NewlineFramer;
 
 #[runtime::main]
 async fn main() {
@@ -138,7 +135,7 @@ async fn handle_connection(connection: ArqStream) {
     // which extracts every line of text. Binary streams
     // like ArqStream have no message boundary delimiters,
     // so it is up to you to split it up.
-    let mut framer = Framed::new(connection, NewlineFramer::new());
+    let mut framer = Framed::new(connection, LinesCodec {});
 
     loop {
         // read a line
@@ -148,7 +145,12 @@ async fn handle_connection(connection: ArqStream) {
                 // end of connection
                 break;
             }
-            Some(line) => line,
+            Some(Ok(line)) => line,
+            Some(Err(e)) => {
+                // end of connection, abnormally
+                warn!("Unable to frame line: {}", e);
+                break;
+            },
         };
         info!("RX: {}", &line);
 

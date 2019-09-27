@@ -19,6 +19,7 @@ use futures::io::{AsyncRead, AsyncWrite};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{Stream, StreamExt};
 use futures::task::{noop_waker_ref, Context, Poll};
+use futures_codec::Framed;
 
 use runtime::net::TcpStream;
 use runtime::time::FutureExt;
@@ -29,7 +30,6 @@ use super::data::{DataIn, DataOut};
 use super::dataevent::{DataEvent, DataEventStream};
 
 use crate::arq::{ConnectionFailedReason, ConnectionInfo};
-use crate::framer::Framed;
 use crate::framing::data::TncDataFraming;
 use crate::protocol::command;
 use crate::protocol::command::Command;
