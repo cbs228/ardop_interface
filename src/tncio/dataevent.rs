@@ -1,7 +1,7 @@
 //! Data port connection and events stream
 //!
 
-use std::convert::Into;
+use std::convert::{From, Into};
 use std::io;
 use std::pin::Pin;
 use std::string::String;
@@ -41,7 +41,7 @@ pub enum DataEvent {
 ///    to the TNC.
 pub struct DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
+    D: Stream<Item = io::Result<DataIn>> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     data_inout: D,
@@ -53,7 +53,7 @@ where
 
 impl<D, E> DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
+    D: Stream<Item = io::Result<DataIn>> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     /// Create new data event stream/sink
@@ -101,14 +101,14 @@ where
 
 impl<D, E> Unpin for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
+    D: Stream<Item = io::Result<DataIn>> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
 }
 
 impl<D, E> Stream for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
+    D: Stream<Item = io::Result<DataIn>> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     type Item = DataEvent;
@@ -121,14 +121,12 @@ where
             while !this.data_eof && !this.event_eof {
                 let mut either = select(this.data_inout.next(), this.event_in.next());
                 match ready!(Pin::new(&mut either).poll(cx)) {
-                    Either::Left((Some(data), _f)) => {
-                        return Poll::Ready(Some(DataEvent::Data(data)))
-                    }
-                    Either::Left((None, _f)) => this.data_eof = true,
+                    Either::Left((Some(Ok(data)), _f)) => return Poll::Ready(Some(data.into())),
+                    Either::Left((_e, _f)) => this.data_eof = true,
                     Either::Right((Some(evt), _f)) => {
                         // try to process this event
                         if let Some(conn_evt) = this.conn_state.process(evt) {
-                            return Poll::Ready(Some(DataEvent::Event(conn_evt)));
+                            return Poll::Ready(Some(conn_evt.into()));
                         }
                     }
                     Either::Right((None, _f)) => this.event_eof = true,
@@ -139,8 +137,8 @@ where
         if !this.data_eof {
             while !this.data_eof {
                 match ready!(Pin::new(&mut this.data_inout).poll_next(cx)) {
-                    Some(data) => return Poll::Ready(Some(DataEvent::Data(data))),
-                    None => this.data_eof = true,
+                    Some(Ok(data)) => return Poll::Ready(Some(data.into())),
+                    _ => this.data_eof = true,
                 }
             }
         } else if !this.event_eof {
@@ -150,7 +148,7 @@ where
                     // try to process this event
                     {
                         if let Some(conn_evt) = this.conn_state.process(evt) {
-                            return Poll::Ready(Some(DataEvent::Event(conn_evt)));
+                            return Poll::Ready(Some(conn_evt.into()));
                         }
                     }
                     None => this.event_eof = true,
@@ -165,7 +163,7 @@ where
 
 impl<D, E> Sink<DataOut> for DataEventStream<D, E>
 where
-    D: Stream<Item = DataIn> + Sink<DataOut, Error = io::Error> + Unpin,
+    D: Stream<Item = io::Result<DataIn>> + Sink<DataOut, Error = io::Error> + Unpin,
     E: Stream<Item = Event> + Unpin,
 {
     type Error = io::Error;
@@ -188,6 +186,18 @@ where
     }
 }
 
+impl From<DataIn> for DataEvent {
+    fn from(data: DataIn) -> Self {
+        DataEvent::Data(data)
+    }
+}
+
+impl From<ConnectionStateChange> for DataEvent {
+    fn from(conn: ConnectionStateChange) -> Self {
+        DataEvent::Event(conn)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -197,9 +207,9 @@ mod test {
     use futures::executor;
     use futures::stream;
     use futures::stream::StreamExt;
+    use futures_codec::Framed;
 
     use crate::arq::ConnectionFailedReason;
-    use crate::framer::Framed;
     use crate::framing::data::TncDataFraming;
 
     #[test]

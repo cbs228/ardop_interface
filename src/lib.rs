@@ -175,6 +175,11 @@
 //! pacmd set-default-source Virtual1.monitor
 //! ```
 //!
+//! `ardopc` was designed for the ALSA sound APIs. Performance
+//! may be degraded when running with pulseaudio. On some systems,
+//! it may help to keep the pulseaudio volume control
+//! (`pavucontrol`) program open while ardopc is running.
+//!
 //! Start two instances of ardopc
 //!
 //! ```bash
@@ -227,10 +232,6 @@
 //! The following other features are currently not implemented
 //! by this crate.
 //!
-//! * **Busy channel detection**: This crate relies on the
-//!   ARDOP TNC to perform busy channel detection. Support for
-//!   this functionality varies across ARDOP implementations.
-//!
 //! * **Rig control**: No type of rig control is presently
 //!   integrated. This crate cannot provide the following
 //!   functionality, at present.
@@ -271,6 +272,7 @@ extern crate nom;
 extern crate bytes;
 #[macro_use]
 extern crate futures;
+extern crate futures_codec;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -280,7 +282,6 @@ extern crate regex;
 extern crate runtime;
 
 pub mod arq;
-pub mod framer;
 pub mod tnc;
 
 mod framing;

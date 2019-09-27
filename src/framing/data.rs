@@ -1,11 +1,9 @@
 //! Framing for the TNC data protocol
 //!
 use std::cmp::min;
-use std::io;
 
 use bytes::{BufMut, BytesMut};
-
-use crate::framer::{Decoder, Encoder};
+use futures_codec::{Decoder, Encoder};
 
 use crate::tncio::data::{DataIn, DataOut};
 
@@ -20,9 +18,10 @@ impl TncDataFraming {
 }
 
 impl Encoder for TncDataFraming {
-    type EncodeItem = DataOut;
+    type Item = DataOut;
+    type Error = std::io::Error;
 
-    fn encode(&mut self, item: Self::EncodeItem, dst: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         // data is prefixed with a big endian size
         //
         // if we have more than 2**16 bytes to send, we need to split it up
@@ -42,13 +41,14 @@ impl Encoder for TncDataFraming {
 }
 
 impl Decoder for TncDataFraming {
-    type DecodeItem = DataIn;
+    type Item = DataIn;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::DecodeItem>> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.len() < 5 {
             return Ok(None);
         }
-        let out = DataIn::parse(src.as_ref());
+        let out = DataIn::parse(src.as_ref())?;
         let _ = src.split_to(out.0);
         Ok(out.1)
     }
@@ -61,10 +61,8 @@ mod test {
     use std::io::Cursor;
 
     use bytes::{Buf, Bytes};
-    use futures::executor::ThreadPool;
     use futures::prelude::*;
-
-    use crate::framer::Framed;
+    use futures_codec::Framed;
 
     #[test]
     fn test_encode() {
@@ -94,21 +92,18 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_decode() {
+    #[runtime::test]
+    async fn test_decode() {
         let words = b"\x00\x08ARQHELLO\x00\x08FECWORLDERR".to_vec();
         let curs = Cursor::new(words);
         let mut framer = Framed::new(curs, TncDataFraming::new());
-        let mut exec = ThreadPool::new().expect("Failed to create threadpool");
-        exec.run(async {
-            assert_eq!(
-                DataIn::ARQ(Bytes::from("HELLO")),
-                framer.next().await.unwrap()
-            );
-            assert_eq!(
-                DataIn::FEC(Bytes::from("WORLD")),
-                framer.next().await.unwrap()
-            );
-        });
+        assert_eq!(
+            DataIn::ARQ(Bytes::from("HELLO")),
+            framer.next().await.unwrap().unwrap()
+        );
+        assert_eq!(
+            DataIn::FEC(Bytes::from("WORLD")),
+            framer.next().await.unwrap().unwrap()
+        );
     }
 }
