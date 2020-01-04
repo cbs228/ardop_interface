@@ -16,25 +16,26 @@
 //! # Example
 //!
 //! ```no_run
-//! #![feature(async_await)]
 //! use std::net::SocketAddr;
+//! use async_std::prelude::*;
 //! use futures::prelude::*;
 //!
 //! use ardop_interface::tnc::*;
 //!
-//! #[runtime::main]
-//! async fn main() {
-//!    let addr = "127.0.0.1:8515".parse().unwrap();
-//!    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
-//!        .await
-//!        .unwrap();
-//!    match tnc.version().await {
-//!         Ok(version) => println!("Connected to TNC version {}", version),
-//!         Err(e) => println!("Can't query TNC version: {}", e)
-//!    }
-//!    if let Err(e) = tnc.set_gridsquare("EM00").await {
-//!         println!("Can't set GRIDSQUARE: {}", e);
-//!    }
+//! fn main() {
+//!    async_std::task::block_on(async {
+//!         let addr = "127.0.0.1:8515".parse().unwrap();
+//!         let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
+//!             .await
+//!             .unwrap();
+//!         match tnc.version().await {
+//!              Ok(version) => println!("Connected to TNC version {}", version),
+//!              Err(e) => println!("Can't query TNC version: {}", e)
+//!         }
+//!         if let Err(e) = tnc.set_gridsquare("EM00").await {
+//!             println!("Can't set GRIDSQUARE: {}", e);
+//!         }
+//!    })
 //! }
 //! ```
 //!

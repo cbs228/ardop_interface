@@ -271,33 +271,32 @@ impl ArdopTnc {
     ///
     /// # Timeouts
     /// This method will await forever, but one can wrap it in a
-    /// timeout with the `futures_timer` crate to make it expire
+    /// timeout with the `async_std` crate to make it expire
     /// sooner.
     ///
     /// ```no_run
-    /// #![feature(async_await)]
     /// use std::net::SocketAddr;
     /// use std::time::Duration;
+    /// use async_std::prelude::FutureExt;
     /// use futures::prelude::*;
-    /// use runtime::prelude::*;
-    /// use futures_timer::FutureExt;
     ///
     /// use ardop_interface::tnc::*;
     ///
-    /// #[runtime::main]
-    /// async fn main() {
-    ///    let addr = "127.0.0.1:8515".parse().unwrap();
-    ///    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
-    ///        .await
-    ///        .unwrap();
-    ///    match tnc
-    ///        .listen(500, false)
-    ///        .timeout(Duration::from_secs(30))
-    ///        .await {
-    ///       Err(TncError::TimedOut) => { /* timed out */ },
-    ///       Err(e) => println!("Fatal TNC error: {}", e),
-    ///       Ok(conn) => println!("Connected: {}", conn)
-    ///    }
+    /// fn main() {
+    ///    async_std::task::block_on(async {
+    ///         let addr = "127.0.0.1:8515".parse().unwrap();
+    ///         let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
+    ///             .await
+    ///             .unwrap();
+    ///          match tnc
+    ///             .listen(500, false)
+    ///             .timeout(Duration::from_secs(30))
+    ///             .await {
+    ///                 Err(e) => println!("TNC timeout: {}", e),
+    ///                 Ok(Err(e)) => println!("Fatal TNC error: {}", e),
+    ///                 Ok(Ok(conn)) => println!("Connected: {}", conn)
+    ///             }
+    ///    })
     /// }
     /// ```
     ///

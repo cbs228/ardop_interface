@@ -5,6 +5,8 @@ use std::fmt;
 use std::io;
 use std::string::String;
 
+use async_std::future::TimeoutError;
+
 use futures::channel::mpsc::{SendError, TrySendError};
 
 use crate::protocol::response::CommandResult;
@@ -78,6 +80,12 @@ impl From<SendError> for TncError {
 impl<T> From<TrySendError<T>> for TncError {
     fn from(_e: TrySendError<T>) -> Self {
         TncError::IoError(connection_reset_err())
+    }
+}
+
+impl From<TimeoutError> for TncError {
+    fn from(_e: TimeoutError) -> Self {
+        TncError::TimedOut
     }
 }
 

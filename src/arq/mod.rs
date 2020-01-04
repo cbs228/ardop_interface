@@ -11,7 +11,6 @@
 //! # Example
 //!
 //! ```no_run
-//! #![feature(async_await)]
 //! use std::str;
 //!
 //! use futures::prelude::*;
@@ -36,8 +35,9 @@
 //! # Async I/O Interface
 //!
 //! The [ArqStream](struct.ArqStream.html) implements the
-//! `futures::io::AsyncRead` and `futures::io::AsyncWrite` traits.
-//! This makes the `ArqStream` behave like an asynchronous
+//! [`futures::io::AsyncRead`](https://docs.rs/futures/latest/futures/io/trait.AsyncRead.html)
+//! and [`futures::io::AsyncWrite`](https://docs.rs/futures/latest/futures/io/trait.AsyncWrite.html)
+//! traits. This makes the `ArqStream` behave like an asynchronous
 //! `TcpStream`. Bytes written to the object will be sent as
 //! payload data to the remote peer. Data sent from the peer will
 //! be available for reading.
@@ -121,9 +121,9 @@
 //!
 //! Using the disconnect-on-Drop behavior will panic if the async
 //! runtime is the `LocalPool` from the `futures` crate. We
-//! recommend the use of the `runtime` crate instead. Alternatively,
-//! ensure to close the connection before letting the `ArqStream`
-//! drop.
+//! recommend the use of the `async_std` or `tokio` crate instead.
+//! Alternatively, ensure to close the connection before letting
+//! the `ArqStream` drop.
 
 mod arqstream;
 mod connectioninfo;

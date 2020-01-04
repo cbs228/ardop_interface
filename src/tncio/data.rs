@@ -62,8 +62,8 @@ impl DataIn {
             Ok((rem, (dtype, data))) => {
                 let taken = buf.len() - rem.len();
                 let out = match dtype {
-                    "ARQ" => Some(DataIn::ARQ(Bytes::from(data))),
-                    "FEC" => Some(DataIn::FEC(Bytes::from(data))),
+                    "ARQ" => Some(DataIn::ARQ(Bytes::copy_from_slice(data))),
+                    "FEC" => Some(DataIn::FEC(Bytes::copy_from_slice(data))),
                     "IDF" => parse_id_frame(data),
                     _ => None,
                 };
