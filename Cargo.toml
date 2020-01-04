@@ -28,11 +28,11 @@ version = "^1.4.0"
 features = ["unstable"]
 
 [workspace]
-#members = [
-#    "examples/echoclient",
-#    "examples/echoserver",
-#    "examples/ping"
-#]
+members = [
+    "examples/echoclient",
+    "examples/echoserver",
+    "examples/ping"
+]
 
 [badges]
 maintenance = {status = "experimental"}
