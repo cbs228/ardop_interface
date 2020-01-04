@@ -99,7 +99,9 @@ async fn async_main() {
 
     // if beaconing, send beacon
     if beacon_timeout > Duration::from_nanos(0) {
-        tnc.sendid().await.expect("Failed to send beacon.");
+        tnc.sendid()
+            .await
+            .unwrap_or_else(|_x| warn!("Failed to send beacon."));
     }
 
     loop {
@@ -112,7 +114,9 @@ async fn async_main() {
             Err(TncError::TimedOut) => {
                 // Our listen_monitor future timed out, which means
                 // it is time to send a beacon.
-                tnc.sendid().await.expect("Failed to send beacon.");
+                tnc.sendid()
+                    .await
+                    .unwrap_or_else(|_x| warn!("Failed to send beacon."));
             }
             Err(e) => {
                 panic!("TNC failed to send beacon: {}", e);
