@@ -7,6 +7,7 @@ use std::string::String;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_std::prelude::FutureExt;
 use futures::lock::Mutex;
 
 use super::{DiscoveredPeer, PingAck, PingFailedReason, TncResult};
@@ -259,53 +260,32 @@ impl ArdopTnc {
     ///   *lower* bandwidth than `bw` with the remote peer. If
     ///   true, the connection will be made at `bw` rate---or not
     ///   at all.
+    /// - `timeout`: Return a `TimedOut` error if no incoming
+    ///   connection is received within the `timeout`. A timeout of
+    ///   "zero" will wait forever.
     ///
     /// # Return
     /// The result contains failures related to the local TNC
     /// connection.
     ///
-    /// This method will await forever for an inbound connection
-    /// to complete. Connections which fail during the setup phase
+    /// Connections which fail during the setup phase
     /// will not be reported to the application. Unless the local
-    /// TNC fails, this method will not fail.
-    ///
-    /// # Timeouts
-    /// This method will await forever, but one can wrap it in a
-    /// timeout with the `futures_timer` crate to make it expire
-    /// sooner.
-    ///
-    /// ```no_run
-    /// #![feature(async_await)]
-    /// use std::net::SocketAddr;
-    /// use std::time::Duration;
-    /// use futures::prelude::*;
-    /// use runtime::prelude::*;
-    /// use futures_timer::FutureExt;
-    ///
-    /// use ardop_interface::tnc::*;
-    ///
-    /// #[runtime::main]
-    /// async fn main() {
-    ///    let addr = "127.0.0.1:8515".parse().unwrap();
-    ///    let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
-    ///        .await
-    ///        .unwrap();
-    ///    match tnc
-    ///        .listen(500, false)
-    ///        .timeout(Duration::from_secs(30))
-    ///        .await {
-    ///       Err(TncError::TimedOut) => { /* timed out */ },
-    ///       Err(e) => println!("Fatal TNC error: {}", e),
-    ///       Ok(conn) => println!("Connected: {}", conn)
-    ///    }
-    /// }
-    /// ```
+    /// TNC fails, or the timeout elapses, this method will not fail.
     ///
     /// An expired timeout will return a
     /// [`TncError::TimedOut`](enum.TncError.html#variant.TimedOut).
-    pub async fn listen(&mut self, bw: u16, bw_forced: bool) -> TncResult<ArqStream> {
+    pub async fn listen(
+        &mut self,
+        bw: u16,
+        bw_forced: bool,
+        timeout: Duration,
+    ) -> TncResult<ArqStream> {
         let mut tnc = self.inner.lock().await;
-        let nfo = tnc.listen(bw, bw_forced).await?;
+        let nfo = if timeout > Duration::from_nanos(0) {
+            tnc.listen(bw, bw_forced).timeout(timeout).await??
+        } else {
+            tnc.listen(bw, bw_forced).await?
+        };
         Ok(ArqStream::new(self.inner.clone(), nfo))
     }
 
@@ -317,24 +297,29 @@ impl ArdopTnc {
     /// * ID Frames (`IDF`)
     /// * Pings
     ///
-    /// This method will await forever for a peer to be discovered
-    /// See the [`listen()`](#method.listen) method for a futures
-    /// extension which adds a timeout.
-    ///
     /// The TNC has no memory of discovered stations and will
     /// return a result every time it hears one.
+    ///
+    /// # Parameters
+    /// - `timeout`: Return a `TimedOut` error if no activity is
+    ///   detected within the `timeout`. A timeout of
+    ///   "zero" will wait forever.
     ///
     /// # Return
     /// The result contains failures related to the local TNC
     /// connection.
     ///
-    /// This method will await forever for a peer discovery. Unless
-    /// the local TNC fails, this method will not fail. If a peer
-    /// is discovered, a [`DiscoveredPeer`](struct.DiscoveredPeer.html)
+    /// Unless the local TNC fails, or the timeout elapses, this method
+    /// will not fail. If a peer is discovered, a
+    /// [`DiscoveredPeer`](struct.DiscoveredPeer.html)
     /// is returned.
-    pub async fn monitor(&mut self) -> TncResult<DiscoveredPeer> {
+    pub async fn monitor(&mut self, timeout: Duration) -> TncResult<DiscoveredPeer> {
         let mut tnc = self.inner.lock().await;
-        tnc.monitor().await
+        if timeout > Duration::from_nanos(0) {
+            tnc.monitor().timeout(timeout).await?
+        } else {
+            tnc.monitor().await
+        }
     }
 
     /// Listen for incoming connections or for band activity
@@ -360,20 +345,31 @@ impl ArdopTnc {
     ///   *lower* bandwidth than `bw` with the remote peer. If
     ///   true, the connection will be made at `bw` rate---or not
     ///   at all.
+    /// - `timeout`: Return a `TimedOut` error if no activity or
+    ///   connection is detected within the `timeout`. A timeout of
+    ///   "zero" will wait forever.
     ///
     /// # Return
     /// The result contains failures related to the local TNC
-    /// connection. The result will also error if this method is
-    /// wrapped in a `.timeout()` future, as per
-    /// [`listen()`](#method.listen).
+    /// connection. The result will also error if the timeout
+    /// expires.
     ///
-    /// This method will await forever for an inbound connection
-    /// to complete. Connections which fail during the setup phase
-    /// will not be reported to the application. Unless the local
-    /// TNC fails, this method will not fail.
-    pub async fn listen_monitor(&mut self, bw: u16, bw_forced: bool) -> TncResult<ListenMonitor> {
+    /// Connections which fail during the setup phase
+    /// will not be reported to the application.
+    pub async fn listen_monitor(
+        &mut self,
+        bw: u16,
+        bw_forced: bool,
+        timeout: Duration,
+    ) -> TncResult<ListenMonitor> {
         let mut tnc = self.inner.lock().await;
-        match tnc.listen_monitor(bw, bw_forced).await? {
+        let res = if timeout > Duration::from_nanos(0) {
+            tnc.listen_monitor(bw, bw_forced).timeout(timeout).await??
+        } else {
+            tnc.listen_monitor(bw, bw_forced).await?
+        };
+
+        match res {
             ConnectionInfoOrPeerDiscovery::Connection(nfo) => Ok(ListenMonitor::Connection(
                 ArqStream::new(self.inner.clone(), nfo),
             )),

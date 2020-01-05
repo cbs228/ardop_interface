@@ -1,6 +1,5 @@
-#![feature(async_await)]
-
 extern crate ardop_interface;
+extern crate async_std;
 #[macro_use]
 extern crate clap;
 extern crate futures;
@@ -13,6 +12,7 @@ use std::process::exit;
 use std::str;
 use std::time::Duration;
 
+use async_std::task;
 use clap::{App, Arg};
 use futures::prelude::*;
 
@@ -25,8 +25,11 @@ const SHAKESPEARE: &[&[u8]] = &[
     b"The evil that men do lives after them / The good is oft interred with their bones.\n",
 ];
 
-#[runtime::main]
-async fn main() {
+fn main() {
+    task::block_on(async_main())
+}
+
+async fn async_main() {
     // argument parsing
     let matches = App::new("echoclient")
         .version(crate_version!())

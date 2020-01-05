@@ -1,6 +1,5 @@
-#![feature(async_await)]
-
 extern crate ardop_interface;
+extern crate async_std;
 #[macro_use]
 extern crate clap;
 extern crate futures;
@@ -8,6 +7,7 @@ extern crate futures;
 extern crate log;
 extern crate stderrlog;
 
+use async_std::task;
 use std::net::ToSocketAddrs;
 use std::process::exit;
 use std::time::Duration;
@@ -16,8 +16,11 @@ use clap::{App, Arg};
 
 use ardop_interface::tnc::*;
 
-#[runtime::main]
-async fn main() {
+fn main() {
+    task::block_on(async_main())
+}
+
+async fn async_main() {
     // argument parsing
     let matches = App::new("ping")
         .version(crate_version!())

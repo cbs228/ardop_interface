@@ -339,7 +339,7 @@ impl ArqState {
         }
 
         // enqueue the bytes for sending
-        let bytes_out = Bytes::from(buf);
+        let bytes_out = Bytes::copy_from_slice(buf);
         let bytes_len = bytes_out.len();
         match Pin::new(&mut *io).start_send(bytes_out) {
             Ok(_ok) => (),

@@ -254,9 +254,8 @@ where
 mod test {
     use super::*;
 
-    use std::io::Cursor;
-
     use futures::executor;
+    use futures::io::Cursor;
 
     use crate::protocol::constants::CommandID;
 
