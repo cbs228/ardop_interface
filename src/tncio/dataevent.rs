@@ -202,9 +202,8 @@ impl From<ConnectionStateChange> for DataEvent {
 mod test {
     use super::*;
 
-    use std::io::Cursor;
-
     use futures::executor;
+    use futures::io::Cursor;
     use futures::stream;
     use futures::stream::StreamExt;
     use futures_codec::Framed;

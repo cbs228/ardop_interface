@@ -31,7 +31,7 @@ impl Encoder for TncDataFraming {
             let remain = item.len() - pos;
             let chunk_size = min(remain, u16::max_value() as usize);
             dst.reserve(2);
-            dst.put_u16_be(chunk_size as u16);
+            dst.put_u16(chunk_size as u16);
             dst.extend_from_slice(&item.as_ref()[pos..pos + chunk_size]);
 
             pos += chunk_size;
@@ -58,9 +58,9 @@ impl Decoder for TncDataFraming {
 mod test {
     use super::*;
 
-    use std::io::Cursor;
-
+    use async_std::task;
     use bytes::{Buf, Bytes};
+    use futures::io::Cursor;
     use futures::prelude::*;
     use futures_codec::Framed;
 
@@ -87,23 +87,25 @@ mod test {
         assert_eq!(outbuf[0], 255u8);
         assert_eq!(outbuf[1], 255u8);
         assert_eq!(
-            Cursor::new(&outbuf[65537..65539]).get_u16_be(),
+            Bytes::copy_from_slice(&outbuf[65537..65539]).get_u16(),
             (66000 - 65535) as u16
         );
     }
 
-    #[runtime::test]
-    async fn test_decode() {
-        let words = b"\x00\x08ARQHELLO\x00\x08FECWORLDERR".to_vec();
-        let curs = Cursor::new(words);
-        let mut framer = Framed::new(curs, TncDataFraming::new());
-        assert_eq!(
-            DataIn::ARQ(Bytes::from("HELLO")),
-            framer.next().await.unwrap().unwrap()
-        );
-        assert_eq!(
-            DataIn::FEC(Bytes::from("WORLD")),
-            framer.next().await.unwrap().unwrap()
-        );
+    #[test]
+    fn test_decode() {
+        task::block_on(async {
+            let words = b"\x00\x08ARQHELLO\x00\x08FECWORLDERR".to_vec();
+            let curs = Cursor::new(words);
+            let mut framer = Framed::new(curs, TncDataFraming::new());
+            assert_eq!(
+                DataIn::ARQ(Bytes::from("HELLO")),
+                framer.next().await.unwrap().unwrap()
+            );
+            assert_eq!(
+                DataIn::FEC(Bytes::from("WORLD")),
+                framer.next().await.unwrap().unwrap()
+            );
+        })
     }
 }

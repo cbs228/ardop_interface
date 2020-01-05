@@ -20,31 +20,32 @@ full-featured Rust applications that communicate over the radio.
 ## Minimal Example
 
 ```rust
-#![feature(async_await)]
 use std::net::SocketAddr;
+use async_std::task;
 use futures::prelude::*;
 
 use ardop_interface::tnc::*;
 
-#[runtime::main]
-async fn main() {
-   let addr = "127.0.0.1:8515".parse().unwrap();
-   let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
-       .await
-       .unwrap();
-   let mut conn = tnc.connect("T4GET", 500, false, 3)
-       .await
-       .expect("TNC failure")
-       .expect("Connection failed");
-   conn.write_all(b"Hello, world!\n").await.unwrap();
-   conn.close().await;
+fn main() {
+   task::block_on(async {
+        let addr = "127.0.0.1:8515".parse().unwrap();
+        let mut tnc = ArdopTnc::new(&addr, "MYC4LL")
+            .await
+            .unwrap();
+        let mut conn = tnc.connect("T4GET", 500, false, 3)
+            .await
+            .expect("TNC failure")
+            .expect("Connection failed");
+        conn.write_all(b"Hello, world!\n").await.unwrap();
+        conn.close().await;
+   })
 }
 ```
 
 See the
 [`examples/`](https://github.com/cbs228/ardop_interface/tree/master/examples)
 directory in the source code repository for a complete client
-and server. The examples also demonstrate the `async` `runtime` crate,
+and server. The examples also demonstrate the `async_std` crate,
 argument parsing, and logging.
 
 ## The ARDOP Modem
@@ -96,27 +97,15 @@ resource footprint.
 
 ## Development Status
 
-This crate's API will not stabilize until the stable release
-of
-* the [futures-preview](https://docs.rs/futures-preview/) crate; and
-* the [async-await](https://areweasyncyet.rs/) Rust language feature.
-
-For now, it is necessary to use a `nightly` Rust toolchain.
-
-This crate has been tested against rust `1.37.0-nightly` built
-on `2019-06-23`. Earlier builds may not function correctly.
+This crate is experimental. Its API will not stabilize until
+`ardop_interface` can be built without `unstable` features of
+[`async_std`](https://docs.rs/async-std/).
 
 ## Prerequisites
 
-First, ensure that a nightly Rust is installed and available on
-your platform.
+Rust 1.40 or later is required.
 
-```bash
-rustup toolchain install nightly
-rustup default nightly
-```
-
-Next, obtain a compatible implementation of ARDOP. You must use
+Obtain a compatible implementation of ARDOP. You must use
 ARDOP software which implements protocol **version one**.
 The ARDOP v2 specification has been withdrawn by its authors, and
 version three is presently in development. The TNC interface on

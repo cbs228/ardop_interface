@@ -67,7 +67,7 @@ impl ArqStream {
     ///
     /// Counts the total number of *payload* bytes which have
     /// been transmitted over the air *AND* acknowledged by
-    /// the remote peer. This value is aggregated over the
+    /// the local station. This value is aggregated over the
     /// lifetime of the `ArqStream`.
     pub fn bytes_received(&self) -> u64 {
         self.state.bytes_received()
@@ -223,9 +223,8 @@ impl Drop for ArqStream {
         // provide the asynchronous runtime. You cannot execute a
         // LocalPool executor from within another LocalPool executor.
         //
-        // We recommend the use of the "runtime" crate to power user
-        // applications. It provides a more full-featured runtime,
-        // anyway.
+        // We recommend the use of either "tokio" or "async_std"
+        // crates to provide your runtime environment.
         let tncref = self.tnc.clone();
         executor::block_on(async move {
             let mut tnc = tncref.lock().await;

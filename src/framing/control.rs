@@ -2,7 +2,7 @@
 //!
 use std::string::String;
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use futures_codec::{Decoder, Encoder};
 
 use crate::protocol::response::Response;
@@ -51,10 +51,10 @@ impl Decoder for TncControlFraming {
 mod test {
     use super::*;
 
-    use std::io::Cursor;
     use std::str;
 
     use futures::executor;
+    use futures::io::Cursor;
     use futures::prelude::*;
 
     use futures_codec::Framed;

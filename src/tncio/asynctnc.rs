@@ -21,8 +21,8 @@ use futures::stream::{Stream, StreamExt};
 use futures::task::{noop_waker_ref, Context, Poll};
 use futures_codec::Framed;
 
-use runtime::net::TcpStream;
-use runtime::time::FutureExt;
+use async_std::net::TcpStream;
+use async_std::prelude::*;
 
 use super::controlstream;
 use super::controlstream::{ControlSink, ControlStreamEvents, ControlStreamResults};
@@ -944,187 +944,197 @@ fn command_response_invalid_err() -> io::Error {
 mod test {
     use super::*;
 
-    use std::io::Cursor;
-
     use futures::channel::mpsc;
+    use futures::io::Cursor;
     use futures::sink;
     use futures::stream;
     use futures::task;
 
     use crate::protocol::constants::CommandID;
 
-    #[runtime::test]
-    async fn test_execute_command_good_response() {
-        let cmd_out = command::listen(true);
-        let res_in: Vec<CommandResult> = vec![Ok((CommandID::LISTEN, None))];
+    #[test]
+    fn test_execute_command_good_response() {
+        async_std::task::block_on(async {
+            let cmd_out = command::listen(true);
+            let res_in: Vec<CommandResult> = vec![Ok((CommandID::LISTEN, None))];
 
-        let mut sink_out = sink::drain();
-        let mut stream_in = stream::iter(res_in.into_iter());
-        let timeout = Duration::from_secs(10);
+            let mut sink_out = sink::drain();
+            let mut stream_in = stream::iter(res_in.into_iter());
+            let timeout = Duration::from_secs(10);
 
-        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
+            let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
 
-        match res {
-            Ok((CommandID::LISTEN, None)) => assert!(true),
-            _ => assert!(false),
-        }
-    }
-
-    #[runtime::test]
-    async fn test_execute_command_bad_response() {
-        let cmd_out = command::listen(true);
-        let res_in: Vec<CommandResult> = vec![Ok((CommandID::VERSION, None))];
-
-        let mut sink_out = sink::drain();
-        let mut stream_in = stream::iter(res_in.into_iter());
-        let timeout = Duration::from_secs(10);
-
-        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
-        match res {
-            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::InvalidData, e.kind()),
-            _ => assert!(false),
-        }
-    }
-
-    #[runtime::test]
-    async fn test_execute_command_eof() {
-        let cmd_out = command::listen(true);
-        let res_in: Vec<CommandResult> = vec![];
-
-        let mut sink_out = sink::drain();
-        let mut stream_in = stream::iter(res_in.into_iter());
-        let timeout = Duration::from_secs(10);
-
-        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
-        match res {
-            Err(TncError::IoError(e)) => assert_eq!(e.kind(), io::ErrorKind::ConnectionReset),
-            _ => assert!(false),
-        }
-    }
-
-    #[runtime::test]
-    async fn test_execute_command_timeout() {
-        let cmd_out = command::listen(true);
-
-        let mut sink_out = sink::drain();
-        let mut stream_in = stream::once(futures::future::pending());
-        let timeout = Duration::from_micros(2);
-
-        let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
-        match res {
-            Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::TimedOut, e.kind()),
-            _ => assert!(false),
-        }
-    }
-
-    #[runtime::test]
-    async fn test_streams() {
-        let stream_ctrl = Cursor::new(b"BUSY FALSE\rINPUTPEAKS BLAH\rREJECTEDBW\r".to_vec());
-        let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
-
-        let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
-
-        futures::executor::block_on(async {
-            match tnc.data_stream_sink().next().await {
-                Some(DataEvent::Data(_d)) => assert!(true),
+            match res {
+                Ok((CommandID::LISTEN, None)) => assert!(true),
                 _ => assert!(false),
             }
-
-            match tnc.data_stream_sink().next().await {
-                Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
-                _ => assert!(false),
-            }
-
-            match tnc.data_stream_sink().next().await {
-                Some(DataEvent::Event(ConnectionStateChange::Busy(false))) => assert!(true),
-                _ => assert!(false),
-            }
-
-            match tnc.data_stream_sink().next().await {
-                Some(DataEvent::Event(ConnectionStateChange::Failed(
-                    ConnectionFailedReason::IncompatibleBandwidth,
-                ))) => assert!(true),
-                _ => assert!(false),
-            }
-
-            assert!(tnc.data_stream_sink().next().await.is_none());
-        });
+        })
     }
 
-    #[runtime::test]
-    async fn test_execute_disconnect() {
-        let mut cx = Context::from_waker(task::noop_waker_ref());
+    #[test]
+    fn test_execute_command_bad_response() {
+        async_std::task::block_on(async {
+            let cmd_out = command::listen(true);
+            let res_in: Vec<CommandResult> = vec![Ok((CommandID::VERSION, None))];
 
-        let (mut ctrl_out_snd, mut ctrl_out_rx) = mpsc::unbounded();
-        let (ctrl_in_snd, mut ctrl_in_rx) = mpsc::unbounded();
-        let (evt_in_snd, mut evt_in_rx) = mpsc::unbounded();
+            let mut sink_out = sink::drain();
+            let mut stream_in = stream::iter(res_in.into_iter());
+            let timeout = Duration::from_secs(10);
 
-        // starts disconnection, but no connection in progress
-        let mut state = DisconnectProgress::NoProgress;
-        ctrl_in_snd
-            .unbounded_send(Err("not from state".to_owned()))
-            .unwrap();
-        match execute_disconnect(
-            &mut state,
-            &mut cx,
-            &mut ctrl_out_snd,
-            &mut ctrl_in_rx,
-            &mut evt_in_rx,
-        ) {
-            Poll::Ready(Ok(())) => assert!(true),
-            _ => assert!(false),
-        }
-        assert_eq!(DisconnectProgress::NoProgress, state);
-
-        // starts disconnection
-        state = DisconnectProgress::NoProgress;
-        match execute_disconnect(
-            &mut state,
-            &mut cx,
-            &mut ctrl_out_snd,
-            &mut ctrl_in_rx,
-            &mut evt_in_rx,
-        ) {
-            Poll::Pending => assert!(true),
-            _ => assert!(false),
-        }
-        assert_eq!(DisconnectProgress::SentDisconnect, state);
-        let _ = ctrl_out_rx.try_next().unwrap();
-
-        // make progress towards disconnection
-        ctrl_in_snd
-            .unbounded_send(Ok((CommandID::DISCONNECT, None)))
-            .unwrap();
-        match execute_disconnect(
-            &mut state,
-            &mut cx,
-            &mut ctrl_out_snd,
-            &mut ctrl_in_rx,
-            &mut evt_in_rx,
-        ) {
-            Poll::Pending => assert!(true),
-            _ => assert!(false),
-        }
-        assert_eq!(DisconnectProgress::AckDisconnect, state);
-
-        // finish disconnect
-        evt_in_snd
-            .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(0)))
-            .unwrap();
-        evt_in_snd
-            .unbounded_send(DataEvent::Event(ConnectionStateChange::Closed))
-            .unwrap();
-        match execute_disconnect(
-            &mut state,
-            &mut cx,
-            &mut ctrl_out_snd,
-            &mut ctrl_in_rx,
-            &mut evt_in_rx,
-        ) {
-            Poll::Ready(Ok(())) => assert!(true),
-            _ => assert!(false),
-        }
-        assert_eq!(DisconnectProgress::NoProgress, state);
+            let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
+            match res {
+                Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::InvalidData, e.kind()),
+                _ => assert!(false),
+            }
+        })
     }
 
+    #[test]
+    fn test_execute_command_eof() {
+        async_std::task::block_on(async {
+            let cmd_out = command::listen(true);
+            let res_in: Vec<CommandResult> = vec![];
+
+            let mut sink_out = sink::drain();
+            let mut stream_in = stream::iter(res_in.into_iter());
+            let timeout = Duration::from_secs(10);
+
+            let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
+            match res {
+                Err(TncError::IoError(e)) => assert_eq!(e.kind(), io::ErrorKind::ConnectionReset),
+                _ => assert!(false),
+            }
+        })
+    }
+
+    #[test]
+    fn test_execute_command_timeout() {
+        async_std::task::block_on(async {
+            let cmd_out = command::listen(true);
+
+            let mut sink_out = sink::drain();
+            let mut stream_in = stream::once(futures::future::pending());
+            let timeout = Duration::from_micros(2);
+
+            let res = execute_command(&mut sink_out, &mut stream_in, &timeout, cmd_out).await;
+            match res {
+                Err(TncError::IoError(e)) => assert_eq!(io::ErrorKind::TimedOut, e.kind()),
+                _ => assert!(false),
+            }
+        })
+    }
+
+    #[test]
+    fn test_streams() {
+        async_std::task::block_on(async {
+            let stream_ctrl = Cursor::new(b"BUSY FALSE\rINPUTPEAKS BLAH\rREJECTEDBW\r".to_vec());
+            let stream_data = Cursor::new(b"\x00\x08ARQHELLO\x00\x0BIDFID: W1AW".to_vec());
+
+            let mut tnc = AsyncTnc::new_from_streams(stream_ctrl, stream_data, "W1AW");
+
+            futures::executor::block_on(async {
+                match tnc.data_stream_sink().next().await {
+                    Some(DataEvent::Data(_d)) => assert!(true),
+                    _ => assert!(false),
+                }
+
+                match tnc.data_stream_sink().next().await {
+                    Some(DataEvent::Data(DataIn::IDF(_i0, _i1))) => assert!(true),
+                    _ => assert!(false),
+                }
+
+                match tnc.data_stream_sink().next().await {
+                    Some(DataEvent::Event(ConnectionStateChange::Busy(false))) => assert!(true),
+                    _ => assert!(false),
+                }
+
+                match tnc.data_stream_sink().next().await {
+                    Some(DataEvent::Event(ConnectionStateChange::Failed(
+                        ConnectionFailedReason::IncompatibleBandwidth,
+                    ))) => assert!(true),
+                    _ => assert!(false),
+                }
+
+                assert!(tnc.data_stream_sink().next().await.is_none());
+            });
+        })
+    }
+
+    #[test]
+    fn test_execute_disconnect() {
+        async_std::task::block_on(async {
+            let mut cx = Context::from_waker(task::noop_waker_ref());
+
+            let (mut ctrl_out_snd, mut ctrl_out_rx) = mpsc::unbounded();
+            let (ctrl_in_snd, mut ctrl_in_rx) = mpsc::unbounded();
+            let (evt_in_snd, mut evt_in_rx) = mpsc::unbounded();
+
+            // starts disconnection, but no connection in progress
+            let mut state = DisconnectProgress::NoProgress;
+            ctrl_in_snd
+                .unbounded_send(Err("not from state".to_owned()))
+                .unwrap();
+            match execute_disconnect(
+                &mut state,
+                &mut cx,
+                &mut ctrl_out_snd,
+                &mut ctrl_in_rx,
+                &mut evt_in_rx,
+            ) {
+                Poll::Ready(Ok(())) => assert!(true),
+                _ => assert!(false),
+            }
+            assert_eq!(DisconnectProgress::NoProgress, state);
+
+            // starts disconnection
+            state = DisconnectProgress::NoProgress;
+            match execute_disconnect(
+                &mut state,
+                &mut cx,
+                &mut ctrl_out_snd,
+                &mut ctrl_in_rx,
+                &mut evt_in_rx,
+            ) {
+                Poll::Pending => assert!(true),
+                _ => assert!(false),
+            }
+            assert_eq!(DisconnectProgress::SentDisconnect, state);
+            let _ = ctrl_out_rx.try_next().unwrap();
+
+            // make progress towards disconnection
+            ctrl_in_snd
+                .unbounded_send(Ok((CommandID::DISCONNECT, None)))
+                .unwrap();
+            match execute_disconnect(
+                &mut state,
+                &mut cx,
+                &mut ctrl_out_snd,
+                &mut ctrl_in_rx,
+                &mut evt_in_rx,
+            ) {
+                Poll::Pending => assert!(true),
+                _ => assert!(false),
+            }
+            assert_eq!(DisconnectProgress::AckDisconnect, state);
+
+            // finish disconnect
+            evt_in_snd
+                .unbounded_send(DataEvent::Event(ConnectionStateChange::SendBuffer(0)))
+                .unwrap();
+            evt_in_snd
+                .unbounded_send(DataEvent::Event(ConnectionStateChange::Closed))
+                .unwrap();
+            match execute_disconnect(
+                &mut state,
+                &mut cx,
+                &mut ctrl_out_snd,
+                &mut ctrl_in_rx,
+                &mut evt_in_rx,
+            ) {
+                Poll::Ready(Ok(())) => assert!(true),
+                _ => assert!(false),
+            }
+            assert_eq!(DisconnectProgress::NoProgress, state);
+        })
+    }
 }

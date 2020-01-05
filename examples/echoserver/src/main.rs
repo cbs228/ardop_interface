@@ -1,29 +1,29 @@
-#![feature(async_await)]
-
 extern crate ardop_interface;
-extern crate bytes;
+extern crate async_std;
 #[macro_use]
 extern crate clap;
 extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate futures_codec;
-extern crate futures_timer;
 extern crate stderrlog;
 
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
+use async_std::task;
 use clap::{App, Arg};
 use futures::prelude::*;
 use futures_codec::{Framed, LinesCodec};
-use futures_timer::FutureExt;
 
 use ardop_interface::arq::ArqStream;
 use ardop_interface::tnc::*;
 
-#[runtime::main]
-async fn main() {
+fn main() {
+    task::block_on(async_main())
+}
+
+async fn async_main() {
     // argument parsing
     let matches = App::new("echoserver")
         .version(crate_version!())
@@ -64,7 +64,8 @@ async fn main() {
     let tnc_address_str = matches.value_of("ADDRESS").unwrap();
     let mycallstr = matches.value_of("MYCALL").unwrap();
     let arq_bandwidth = value_t!(matches, "BW", u16).unwrap_or_else(|e| e.exit());
-    let beacon_seconds = value_t!(matches, "beacon", u64).unwrap_or_else(|e| e.exit());
+    let beacon_timeout =
+        Duration::from_secs(value_t!(matches, "beacon", u64).unwrap_or_else(|e| e.exit()));
     let verbose = matches.occurrences_of("verbosity") as usize;
 
     stderrlog::new()
@@ -97,26 +98,25 @@ async fn main() {
         .expect("Can't set GRIDSQUARE.");
 
     // if beaconing, send beacon
-    if beacon_seconds > 0 {
-        tnc.sendid().await.expect("Failed to send beacon.");
+    if beacon_timeout > Duration::from_nanos(0) {
+        tnc.sendid()
+            .await
+            .unwrap_or_else(|_x| warn!("Failed to send beacon."));
     }
 
     loop {
         // wait for a connection, a peer discovery, or
         // for our beacon interval to expire.
-        let listen = if beacon_seconds <= 0 {
-            tnc.listen_monitor(arq_bandwidth, false).await
-        } else {
-            tnc.listen_monitor(arq_bandwidth, false)
-                .timeout(Duration::from_secs(beacon_seconds))
-                .await
-        };
-
-        match listen {
+        match tnc
+            .listen_monitor(arq_bandwidth, false, beacon_timeout)
+            .await
+        {
             Err(TncError::TimedOut) => {
                 // Our listen_monitor future timed out, which means
                 // it is time to send a beacon.
-                tnc.sendid().await.expect("Failed to send beacon.");
+                tnc.sendid()
+                    .await
+                    .unwrap_or_else(|_x| warn!("Failed to send beacon."));
             }
             Err(e) => {
                 panic!("TNC failed to send beacon: {}", e);
@@ -150,7 +150,7 @@ async fn handle_connection(connection: ArqStream) {
                 // end of connection, abnormally
                 warn!("Unable to frame line: {}", e);
                 break;
-            },
+            }
         };
         info!("RX: {}", &line);
 
